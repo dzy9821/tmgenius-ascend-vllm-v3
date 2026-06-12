@@ -2,13 +2,12 @@ from __future__ import annotations
 
 import logging
 import struct
+import re
 from functools import lru_cache
 from typing import Optional
 
 import httpx
 import numpy as np
-
-from qwen_asr import parse_asr_output
 
 from src.config import get_settings
 
@@ -53,9 +52,29 @@ def _build_wav_bytes(pcm_int16: np.ndarray) -> bytes:
     return header + data
 
 
+_ASR_TEXT_TAG_RE = re.compile(r'<asr_text>', re.IGNORECASE)
+
+
 def _parse_asr_response(content: str) -> str:
-    _, text = parse_asr_output(content)
-    return text
+    """Extract text after &lt;asr_text&gt; tag if present, otherwise return raw content.
+
+    Handles Qwen3-ASR output formats:
+      - "language Chinese&lt;asr_text&gt;..." → "..."
+      - "language None&lt;asr_text&gt;" → ""
+      - Plain text without tag → text as-is
+    """
+    if not content:
+        return ""
+
+    parts = _ASR_TEXT_TAG_RE.split(content.strip(), maxsplit=1)
+    if len(parts) > 1:
+        text = parts[1].strip()
+        if not text:
+            return ""
+        return text
+
+    # No &lt;asr_text&gt; tag: treat whole string as plain text
+    return parts[0]
 
 
 def _filter_hallucination(text: str) -> str:
