@@ -7,6 +7,22 @@ from typing import Optional
 
 import httpx
 import numpy as np
+
+# Monkey-patch: 兼容旧版 transformers（func 无默认值），
+# 使 @check_model_inputs() 写法在旧版也能正常工作。
+import transformers.utils.generic as _tug
+_original_check = _tug.check_model_inputs
+
+def _patched_check(func=None, *, tie_last_hidden_states=True):
+    if func is not None:
+        return _original_check(func)
+    # @check_model_inputs() 被不带参数调用 → 返回装饰器
+    def _decorator(f):
+        return _original_check(f)
+    return _decorator
+
+_tug.check_model_inputs = _patched_check
+
 from qwen_asr import parse_asr_output
 
 from src.config import get_settings
