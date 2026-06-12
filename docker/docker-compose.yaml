@@ -1,0 +1,54 @@
+# x86 + NVIDIA GPU 部署（Ascend NPU 见 tmgenius-docker-800i-a2-v2-single-server.yaml）
+services:
+  tmgenius-asr:
+    build:
+      context: .
+      dockerfile: Dockerfile-x86-64
+    image: tmgenius/vllm-asr:x86
+    container_name: tmgenius/vllm-ascend-v1:v0.19.1rc1
+    restart: unless-stopped
+
+    # 需 nvidia-container-toolkit 时可改为: gpus: all
+    devices:
+      - /dev/nvidia0
+      - /dev/nvidia2
+      - /dev/nvidiactl
+      - /dev/nvidia-uvm
+    ipc: host
+    shm_size: "16gb"
+
+    ports:
+      - "8856:8856"   # ASR WebSocket
+      - "15002:15002" # vLLM OpenAI API
+      - "15004:15004" # vLLM OpenAI API
+
+    volumes:
+      # 大模型权重不入镜像，运行时挂载
+      - ./weights/Qwen3-ASR-1.7B:/weights/Qwen3-ASR-1.7B:ro
+      - ./weights/Qwen3-ASR-0.6B:/weights/Qwen3-ASR-0.6B:ro
+      # 无 nvidia-container-toolkit 时挂载宿主机驱动库
+      - /lib/x86_64-linux-gnu/libcuda.so.1:/lib/x86_64-linux-gnu/libcuda.so.1:ro
+      - /lib/x86_64-linux-gnu/libnvidia-ml.so.1:/lib/x86_64-linux-gnu/libnvidia-ml.so.1:ro
+      - /usr/lib/x86_64-linux-gnu/libnvidia-ml.so.1:/usr/lib/x86_64-linux-gnu/libnvidia-ml.so.1:ro
+
+    environment:
+      NVIDIA_VISIBLE_DEVICES: "0,1"
+      LD_LIBRARY_PATH: "/lib/x86_64-linux-gnu:/usr/lib/x86_64-linux-gnu"
+      WS_HOST: "0.0.0.0"
+      WS_PORT: "8856"
+      MAX_CONNECTIONS: "64"
+      LOG_LEVEL: "INFO"
+      OFFLINE_API_BASE: "http://192.168.5.100:15002/v1"
+      ONLINE_API_BASE: "http://192.168.5.100:15004/v1"   
+      ITN_WORKERS: "8"
+      HOTWORDS: "警单"
+      VAD_HOP_SIZE: "640"
+      VAD_THRESHOLD: "0.4"
+      VAD_MAX_SPEECH: "30.0"
+
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://127.0.0.1:8856/api/v1/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 600s

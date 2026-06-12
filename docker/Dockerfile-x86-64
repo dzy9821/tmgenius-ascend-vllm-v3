@@ -1,0 +1,57 @@
+# syntax=docker/dockerfile:1
+FROM python:3.12-bookworm
+
+ENV PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple
+
+# ---- 1. 运行时系统库 + healthcheck ----
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        libopus0 libsndfile1 curl libc++1 libc++abi1 \
+        build-essential g++ && \
+    rm -rf /var/lib/apt/lists/*
+
+# ---- 2. OpenFst（x86_64 libfst*.so 置于 3rd-party/openfst1.8.3/lib/）----
+COPY 3rd-party/openfst1.8.3/lib/* /usr/local/lib/
+COPY 3rd-party/openfst1.8.3/include/ /usr/local/include/fst/
+RUN echo /usr/local/lib > /etc/ld.so.conf.d/openfst.conf && ldconfig
+
+# ---- 3. ITN：pynini + WeTextProcessing ----
+COPY wheels/x86_64/*.whl /tmp/
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install \
+    /tmp/pynini-2.1.6-cp312-cp312-linux_x86_64.whl \
+    /tmp/wetextprocessing-1.0.6.dev3+dirty-py3-none-any.whl \
+    /tmp/rnnoise-0.1.0-py3-none-any.whl
+
+# ---- 4. Python 依赖 ----
+COPY wheels/x86_64/requirements.txt /tmp/requirements.txt
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install -r /tmp/requirements.txt \
+    flashinfer-python==0.6.11.post2
+
+
+# ---- 8. 应用代码（变更频繁，置于依赖层之后）----
+WORKDIR /app
+COPY main.py .
+COPY src/ ./src/
+COPY test/ ./test/
+COPY weights/itn ./weights/itn/
+COPY weights/vad ./weights/vad/
+COPY weights/fst_itn_zh ./weights/fst_itn_zh/
+
+
+# ---- 9. VAD 路径（x86_64 x64），替换 C 库内部的相对路径 onnx_model ----
+RUN ln -sf weights/vad/ten-vad/onnx_model /app/onnx_model
+ENV LD_LIBRARY_PATH=/app/weights/vad/ten-vad/lib/Linux/x64:/usr/local/lib
+
+# ---- 10. vLLM 补丁（官方 python 镜像安装于 site-packages）----
+COPY hot_fix/connections.py /usr/local/lib/python3.12/site-packages/vllm/connections.py
+RUN mkdir -p /workspace
+COPY hot_fix/translation_proxy.py /workspace/translation_proxy.py
+COPY scripts/healthcheck-vl-7b.sh /healthcheck-vl-7b.sh
+COPY scripts/start_asr_gpu.sh /app/scripts/start_asr.sh
+COPY docker/entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /healthcheck-vl-7b.sh /app/scripts/start_asr.sh /app/entrypoint.sh
+
+EXPOSE 8856 15002 15004
+ENTRYPOINT ["/app/entrypoint.sh"]
