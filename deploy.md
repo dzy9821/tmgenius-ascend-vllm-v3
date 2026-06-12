@@ -57,3 +57,19 @@ python main.py
 # 运行 WebSocket 客户端端到端测试
 python test/e2e_ws_client.py
 ```
+
+
+arm
+```sh
+uv pip install \
+    librosa \
+    "torchaudio>=2.0.0" \
+    "fastapi>=0.115.0" \
+    "websockets>=12.0" \
+    "uvicorn[standard]>=0.30.0" \
+    "pydantic>=2.5.0" \
+    "numpy==1.26.4" \
+    "httpx>=0.27.0" \
+    "prometheus-client>=0.21.0" \
+    "soundfile>=0.12.0"
+```
