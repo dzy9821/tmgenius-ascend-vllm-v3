@@ -89,6 +89,9 @@ class VLLMASRClient:
     def __init__(self, api_base: str, model_name: str, api_key: str) -> None:
         self._api_base = api_base.rstrip("/")
         self._model_name = model_name
+        # vLLM 的 /health 在服务根路径，不带 /v1 前缀
+        root = self._api_base[: -len("/v1")] if self._api_base.endswith("/v1") else self._api_base
+        self._health_url = f"{root}/health"
         self._client = httpx.AsyncClient(
             base_url=self._api_base,
             headers={"Authorization": f"Bearer {api_key}"},
@@ -111,7 +114,7 @@ class VLLMASRClient:
 
     async def check_health(self) -> bool:
         try:
-            response = await self._client.get("/health", timeout=5.0)
+            response = await self._client.get(self._health_url, timeout=5.0)
             return response.status_code == 200
         except Exception:
             return False

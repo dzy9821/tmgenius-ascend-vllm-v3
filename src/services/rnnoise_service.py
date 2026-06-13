@@ -7,7 +7,7 @@ from typing import Optional
 
 import numpy as np
 
-from test.rnnoise_denoise import RnnoiseStreamProcessor
+from src.core.rnnoise_denoise import RnnoiseStreamProcessor
 
 logger = logging.getLogger(__name__)
 

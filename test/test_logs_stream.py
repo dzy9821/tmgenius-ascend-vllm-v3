@@ -14,7 +14,7 @@ import time
 import httpx
 import pytest
 
-from core.logging import log_buffer
+from src.core.logging import log_buffer
 from main import app
 
 

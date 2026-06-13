@@ -23,7 +23,7 @@ from src.services.asr_service import close_asr_clients, get_offline_client, get_
 from src.services.itn_service import ITNService
 from src.services.session_manager import SessionManager
 
-from core.logging import log_buffer
+from src.core.logging import log_buffer
 
 
 class JSONFormatter(logging.Formatter):

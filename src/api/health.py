@@ -6,7 +6,7 @@ import logging
 from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 
-from core.logging import log_buffer
+from src.core.logging import log_buffer
 
 logger = logging.getLogger(__name__)
 

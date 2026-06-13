@@ -43,6 +43,7 @@ class QueueMsg:
     text: str
     bg: int
     ed: int
+    final: bool = False
 
 
 @dataclass
@@ -60,6 +61,7 @@ class ReorderState:
     next_seg_id_to_send: int = 0
     pending: dict = field(default_factory=dict)
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    final_seg_id: Optional[int] = None
 
 
 # ── main WebSocket handler ─────────────────────────────────────
@@ -130,10 +132,14 @@ async def handle_websocket(websocket: WebSocket) -> None:
             _do_trigger_offline(
                 audio, tail["start_sample"], tail["end_sample"],
                 fs, hotwords, result_queue, reorder, all_tasks,
+                is_final=True,
             )
         elif fs.online_buffer:
             audio = np.concatenate(fs.online_buffer)
-            _do_trigger_offline(audio, 0, len(audio), fs, hotwords, result_queue, reorder, all_tasks)
+            _do_trigger_offline(
+                audio, 0, len(audio), fs, hotwords, result_queue, reorder, all_tasks,
+                is_final=True,
+            )
 
         await asyncio.gather(*all_tasks, return_exceptions=True)
         await result_queue.put(FINALIZE_SENTINEL)
@@ -202,7 +208,10 @@ def _do_trigger_offline(
     result_queue: asyncio.Queue,
     reorder: ReorderState,
     all_tasks: list,
+    is_final: bool = False,
 ) -> None:
+    if is_final:
+        reorder.final_seg_id = fs.seg_id
     task = asyncio.create_task(
         _do_offline_asr(audio, fs.seg_id, hotwords, result_queue, reorder)
     )
@@ -292,12 +301,15 @@ async def _advance_reorder_pointer(
             t = reorder.pending.pop(reorder.next_seg_id_to_send)
             if t:
                 await result_queue.put(
-                    QueueMsg(reorder.next_seg_id_to_send, "sentence", t, 0, 0)
+                    QueueMsg(
+                        reorder.next_seg_id_to_send, "sentence", t, 0, 0,
+                        final=reorder.next_seg_id_to_send == reorder.final_seg_id,
+                    )
                 )
             reorder.next_seg_id_to_send += 1
 
 
-# ── result sender (hold-last strategy) ────────────────────────
+# ── result sender ──────────────────────────────────────────────
 
 async def _result_sender(
     websocket: WebSocket,
@@ -305,19 +317,19 @@ async def _result_sender(
     sid: str,
     trace_id: str,
 ) -> None:
-    held: Optional[QueueMsg] = None
-    first_sent = False
+    last_sent: Optional[QueueMsg] = None
+    sent_final = False
     while True:
         item = await result_queue.get()
         if item is FINALIZE_SENTINEL:
-            if held is not None:
-                await _send_msg(websocket, held, status=2, sid=sid, trace_id=trace_id)
+            if not sent_final and last_sent is not None:
+                # 尾段无识别文本时不会产生 final 消息，重发最后一条作为终态信号
+                await _send_msg(websocket, last_sent, status=2, sid=sid, trace_id=trace_id)
             break
-        if held is not None:
-            status = 0 if not first_sent else 1
-            await _send_msg(websocket, held, status=status, sid=sid, trace_id=trace_id)
-            first_sent = True
-        held = item
+        status = 2 if item.final else (0 if last_sent is None else 1)
+        await _send_msg(websocket, item, status=status, sid=sid, trace_id=trace_id)
+        last_sent = item
+        sent_final = sent_final or item.final
     try:
         await websocket.close()
     except Exception:
