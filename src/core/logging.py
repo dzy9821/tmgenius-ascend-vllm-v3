@@ -11,13 +11,9 @@ import asyncio
 import collections
 import logging
 import json
-import sys
 from contextvars import ContextVar
-from threading import Lock
-
-from src.config import get_settings
-
-settings = get_settings()
+from typing import Optional
+import threading
 
 # 用于在异步上下文中传递 trace_id
 trace_id_var: ContextVar[str] = ContextVar("trace_id", default="-")
@@ -45,59 +41,50 @@ class InMemoryLogHandler(logging.Handler):
     def __init__(self, capacity: int = 2000):
         super().__init__()
         self._buffer: collections.deque[str] = collections.deque(maxlen=capacity)
-        self._lock = Lock()
+        self._buffer_lock = threading.Lock()
         self._subscribers: set[asyncio.Queue[str]] = set()
+        self._subs_lock = threading.Lock()
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
+
+    def set_loop(self, loop: asyncio.AbstractEventLoop) -> None:
+        self._loop = loop
 
     def emit(self, record: logging.LogRecord) -> None:
         try:
             msg = self.format(record)
-            with self._lock:
+            with self._buffer_lock:
                 self._buffer.append(msg)
-            for q in list(self._subscribers):
-                try:
-                    q.put_nowait(msg)
-                except asyncio.QueueFull:
-                    pass
+
+            loop = self._loop
+            if loop is not None:
+                with self._subs_lock:
+                    subs = list(self._subscribers)
+                for q in subs:
+                    loop.call_soon_threadsafe(self._safe_put, q, msg)
         except Exception:
             self.handleError(record)
 
+    @staticmethod
+    def _safe_put(q: asyncio.Queue[str], msg: str) -> None:
+        try:
+            q.put_nowait(msg)
+        except asyncio.QueueFull:
+            pass
+
     def subscribe(self) -> asyncio.Queue[str]:
         q: asyncio.Queue[str] = asyncio.Queue(maxsize=500)
-        self._subscribers.add(q)
+        with self._subs_lock:
+            self._subscribers.add(q)
         return q
 
     def unsubscribe(self, q: asyncio.Queue[str]) -> None:
-        self._subscribers.discard(q)
+        with self._subs_lock:
+            self._subscribers.discard(q)
 
     def get_recent(self, n: int = 50) -> list[str]:
-        with self._lock:
+        with self._buffer_lock:
             items = list(self._buffer)
         return items[-n:]
 
 
 log_buffer = InMemoryLogHandler(capacity=2000)
-
-
-def setup_logging() -> None:
-    """初始化全局日志配置。"""
-    root = logging.getLogger()
-    root.setLevel(settings.log_level.upper())
-
-    # 清除已有 handler，避免重复
-    root.handlers.clear()
-
-    handler = logging.StreamHandler(sys.stdout)
-    handler.setFormatter(JSONFormatter(datefmt="%Y-%m-%dT%H:%M:%S"))
-    root.addHandler(handler)
-
-    log_buffer.setFormatter(JSONFormatter(datefmt="%Y-%m-%dT%H:%M:%S"))
-    root.addHandler(log_buffer)
-
-    # 降低第三方库日志级别
-    for name in ("uvicorn", "uvicorn.access", "httpx", "httpcore"):
-        logging.getLogger(name).setLevel(logging.WARNING)
-
-
-def get_logger(name: str) -> logging.Logger:
-    """获取带模块名的 logger。"""
-    return logging.getLogger(name)

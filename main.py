@@ -1,9 +1,7 @@
 import asyncio
-import json
 import logging
 import sys
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
 
 from fastapi import FastAPI
 from prometheus_client import make_asgi_app
@@ -23,36 +21,22 @@ from src.services.asr_service import close_asr_clients, get_offline_client, get_
 from src.services.itn_service import ITNService
 from src.services.session_manager import SessionManager
 
-from src.core.logging import log_buffer
-
-
-class JSONFormatter(logging.Formatter):
-    def format(self, record: logging.LogRecord) -> str:
-        entry = {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "level": record.levelname,
-            "logger": record.name,
-            "message": record.getMessage(),
-        }
-        if hasattr(record, "trace_id"):
-            entry["trace_id"] = record.trace_id
-        for key, value in getattr(record, "extra", {}).items():
-            entry[key] = value
-        if record.exc_info and record.exc_info[1]:
-            entry["exception"] = str(record.exc_info[1])
-        return json.dumps(entry, ensure_ascii=False, default=str)
+from src.core.logging import JSONFormatter, log_buffer
 
 
 def setup_logging(level: str) -> None:
+    log_fmt = JSONFormatter(datefmt="%Y-%m-%dT%H:%M:%S")
+
     handler = logging.StreamHandler(sys.stdout)
-    handler.setFormatter(JSONFormatter())
+    handler.setFormatter(log_fmt)
     root = logging.getLogger()
     root.setLevel(getattr(logging, level.upper(), logging.INFO))
     root.handlers.clear()
     root.addHandler(handler)
 
     # 将日志同时写入内存环形缓冲区，供 /logs/stream SSE 端点消费
-    log_buffer.setFormatter(JSONFormatter())
+    log_buffer.setFormatter(log_fmt)
+    log_buffer.set_loop(asyncio.get_running_loop())
     root.addHandler(log_buffer)
 
     # 降低第三方库日志级别
@@ -68,7 +52,7 @@ async def lifespan(app: FastAPI):
     # ---- Startup ----
     setup_logging(settings.log_level)
     logger = logging.getLogger("asr_service")
-    logger.info("Starting ASR service", extra={"port": settings.ws_port})
+    logger.info("Starting ASR service port=%s", settings.ws_port)
 
     app.state.session_manager = SessionManager(settings.max_connections)
 
