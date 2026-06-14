@@ -52,29 +52,26 @@ def _build_wav_bytes(pcm_int16: np.ndarray) -> bytes:
     return header + data
 
 
-_ASR_TEXT_TAG_RE = re.compile(r'<asr_text>', re.IGNORECASE)
+_ASR_TAG_RE = re.compile(r'language\s+\w+\s*<asr_text>', re.IGNORECASE)
 
 
 def _parse_asr_response(content: str) -> str:
-    """Extract text after &lt;asr_text&gt; tag if present, otherwise return raw content.
+    """Strip Qwen3-ASR format tags from transcription output.
 
-    Handles Qwen3-ASR output formats:
-      - "language Chinese&lt;asr_text&gt;..." → "..."
-      - "language None&lt;asr_text&gt;" → ""
+    Handles these Qwen3-ASR output formats:
+      - "language Chinese<asr_text>..." → "..."
+      - "language None<asr_text>" → ""
       - Plain text without tag → text as-is
+      - Multiple tags (model hallucination) → all stripped
+
+    Uses re.sub to remove ALL occurrences, preventing leakage when
+    the model hallucinates extra "language X<asr_text>" prefixes mid-text.
     """
     if not content:
         return ""
 
-    parts = _ASR_TEXT_TAG_RE.split(content.strip(), maxsplit=1)
-    if len(parts) > 1:
-        text = parts[1].strip()
-        if not text:
-            return ""
-        return text
-
-    # No &lt;asr_text&gt; tag: treat whole string as plain text
-    return parts[0]
+    text = _ASR_TAG_RE.sub('', content).strip()
+    return text
 
 
 def _filter_hallucination(text: str) -> str:
