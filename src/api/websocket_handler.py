@@ -12,6 +12,7 @@ import numpy as np
 from fastapi import WebSocket
 
 from src.config import get_settings
+from src.core.logging import trace_id_var
 from src.services.asr_service import get_online_client, get_offline_client
 from src.services.vad_service import TenVADSession
 
@@ -100,6 +101,7 @@ async def handle_websocket(websocket: WebSocket) -> None:
         frame = json.loads(raw)
         header = frame.get("header", {})
         trace_id: str = header.get("traceId", sid[:8])
+        trace_id_var.set(trace_id)
         status: int = header.get("status", 0)
 
         payload = frame.get("payload", {})
@@ -184,6 +186,7 @@ async def _process_audio_frame(
     if rn is not None and rn_proc is not None:
         pcm = await rn.denoise(rn_proc, pcm)
 
+    logger.debug("audio frame: samples=%d online_total=%d", len(pcm), fs.online_total)
     fs.online_buffer.append(pcm)
     fs.online_total += len(pcm)
 
@@ -212,6 +215,11 @@ def _do_trigger_offline(
 ) -> None:
     if is_final:
         reorder.final_seg_id = fs.seg_id
+
+    logger.debug(
+        "offline trigger: seg_id=%d bg=%d ed=%d is_final=%s",
+        fs.seg_id, start_sample // 16, end_sample // 16, is_final,
+    )
     task = asyncio.create_task(
         _do_offline_asr(audio, fs.seg_id, hotwords, result_queue, reorder)
     )
@@ -242,6 +250,8 @@ def _maybe_trigger_online(
     fs.online_busy = True
     fs.online_last_trigger = fs.online_total
 
+    logger.debug("online trigger: seg_id=%d samples=%d epoch=%d", seg_id_snap, len(audio_snap), epoch_snap)
+
     task = asyncio.create_task(
         _do_online_asr(audio_snap, seg_id_snap, epoch_snap, hotwords, result_queue, fs)
     )
@@ -261,8 +271,10 @@ async def _do_online_asr(
     try:
         text = await get_online_client().transcribe(audio, hotwords="")
         if fs.online_epoch != epoch_snap:
+            logger.debug("online stale: seg=%d epoch=%d current=%d", seg_id_snap, epoch_snap, fs.online_epoch)
             return
         if text:
+            logger.debug("online result: seg=%d epoch=%d text=%s", seg_id_snap, epoch_snap, text)
             await result_queue.put(QueueMsg(seg_id_snap, "Progressive", text, 0, 0))
     finally:
         if fs.online_epoch == epoch_snap:
@@ -283,6 +295,7 @@ async def _do_offline_asr(
                 text = await _itn_service.process(text)
             except Exception as exc:
                 logger.warning("ITN failed seg_id=%d: %s", seg_id, exc)
+        logger.debug("offline result: seg=%d text=%s", seg_id, text or "")
         await _advance_reorder_pointer(seg_id, text or None, result_queue, reorder)
     except Exception as exc:
         logger.exception("Offline ASR error seg_id=%d: %s", seg_id, exc)
@@ -297,13 +310,18 @@ async def _advance_reorder_pointer(
 ) -> None:
     async with reorder.lock:
         reorder.pending[seg_id] = text
+        logger.debug("reorder: recv seg=%d text=%s next=%d final_seg=%s",
+                     seg_id, text or "", reorder.next_seg_id_to_send, reorder.final_seg_id)
         while reorder.next_seg_id_to_send in reorder.pending:
             t = reorder.pending.pop(reorder.next_seg_id_to_send)
             if t:
+                is_final = reorder.next_seg_id_to_send == reorder.final_seg_id
+                logger.debug("reorder: emit seg=%d next=%d final=%s",
+                             reorder.next_seg_id_to_send, reorder.next_seg_id_to_send + 1, is_final)
                 await result_queue.put(
                     QueueMsg(
                         reorder.next_seg_id_to_send, "sentence", t, 0, 0,
-                        final=reorder.next_seg_id_to_send == reorder.final_seg_id,
+                        final=is_final,
                     )
                 )
             reorder.next_seg_id_to_send += 1
@@ -322,8 +340,9 @@ async def _result_sender(
     while True:
         item = await result_queue.get()
         if item is FINALIZE_SENTINEL:
+            logger.debug("sender finalize: sent_final=%s last_sent_seg=%s",
+                         sent_final, last_sent.seg_id if last_sent else None)
             if not sent_final and last_sent is not None:
-                # 尾段无识别文本时不会产生 final 消息，重发最后一条作为终态信号
                 await _send_msg(websocket, last_sent, status=2, sid=sid, trace_id=trace_id)
             break
         status = 2 if item.final else (0 if last_sent is None else 1)
@@ -359,7 +378,9 @@ async def _send_msg(
             }
         },
     }
+    json_str = json.dumps(data, ensure_ascii=False)
+    logger.debug("send: status=%d seg=%d type=%s text=%s", status, msg.seg_id, msg.msgtype, msg.text)
     try:
-        await websocket.send_text(json.dumps(data, ensure_ascii=False))
+        await websocket.send_text(json_str)
     except Exception as exc:
         logger.debug("send_msg failed: %s", exc)

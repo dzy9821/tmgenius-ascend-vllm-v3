@@ -54,6 +54,12 @@ class TenVADSession:
         self._speech_start_sample: int = 0
         self._last_speech_end_sample: int = 0
 
+        # gap window state
+        self._gap_active: bool = False
+        self._gap_base_silence: int = 0
+        self._gap_speech: int = 0
+        self._gap_buffer: list[np.ndarray] = []
+
     @property
     def in_speech(self) -> bool:
         return self._in_speech
@@ -109,20 +115,61 @@ class TenVADSession:
 
         if flag == 1:
             if not self._in_speech:
+                # 新语音段开始
                 self._in_speech = True
                 self._speech_frame_count = 0
                 self._silence_frame_count = 0
                 self._segment_frames = []
+                self._gap_active = False
+                self._gap_base_silence = 0
+                self._gap_speech = 0
+                self._gap_buffer.clear()
                 self._speech_start_sample = (
                     self._total_samples - self.hop_size
                     - len(self._pre_snapshot) * self.hop_size
                 )
-            self._speech_frame_count += 1
-            self._silence_frame_count = 0
-            self._segment_frames.append(frame)
-            self._last_speech_end_sample = self._total_samples
+
+            # 静音后出现语音 → 进入 gap 窗口
+            if self._silence_frame_count > 0:
+                if not self._gap_active:
+                    self._gap_active = True
+                    self._gap_base_silence = self._silence_frame_count
+                self._gap_speech = 0
+                self._gap_buffer.clear()
+
+            if self._gap_active:
+                # gap 窗口内：帧进 _gap_buffer，不进 _segment_frames
+                self._gap_speech += 1
+                self._gap_buffer.append(frame)
+            else:
+                # 正常语音
+                self._speech_frame_count += 1
+                self._segment_frames.append(frame)
+                self._last_speech_end_sample = self._total_samples
+                self._silence_frame_count = 0
         else:
             if self._in_speech:
+                # gap burst 结束判断
+                if self._gap_active and self._gap_speech > 0:
+                    gap_speech_dur = self._gap_speech * self.frame_duration
+                    if gap_speech_dur < MIN_SPEECH_DURATION:
+                        # 合并：gap 语音算作静音，gap_buffer 丢弃
+                        self._silence_frame_count = (
+                            self._gap_base_silence + self._gap_speech
+                        )
+                    else:
+                        # 真实语音：flush gap_buffer 进 _segment_frames
+                        self._segment_frames.extend(self._gap_buffer)
+                        self._speech_frame_count += self._gap_speech
+                        self._last_speech_end_sample = (
+                            self._total_samples - self.hop_size
+                        )
+                        self._gap_active = False
+                        self._gap_base_silence = 0
+                        self._silence_frame_count = 0
+                    self._gap_speech = 0
+                    self._gap_buffer.clear()
+
                 self._segment_frames.append(frame)
                 self._silence_frame_count += 1
 
@@ -132,9 +179,21 @@ class TenVADSession:
                 if _should_cut_segment(speech_dur, pause_dur):
                     return self._finalize_segment(speech_dur)
 
+        # 强制上限：用实际段长（含 gap buffer）做检查
         if self._in_speech:
-            speech_dur = self._speech_frame_count * self.frame_duration
-            if speech_dur > MAX_SPEECH_DURATION:
+            total_frames = len(self._segment_frames) + len(self._gap_buffer)
+            total_dur = total_frames * self.frame_duration
+            if total_dur > MAX_SPEECH_DURATION:
+                if self._gap_active and self._gap_buffer:
+                    self._segment_frames.extend(self._gap_buffer)
+                    self._speech_frame_count += self._gap_speech
+                    self._last_speech_end_sample = (
+                        self._total_samples - self.hop_size
+                    )
+                    self._gap_active = False
+                    self._gap_speech = 0
+                    self._gap_buffer.clear()
+                speech_dur = self._speech_frame_count * self.frame_duration
                 return self._finalize_segment(speech_dur)
 
         return None
@@ -171,6 +230,10 @@ class TenVADSession:
         self._speech_frame_count = 0
         self._silence_frame_count = 0
         self._last_speech_end_sample = 0
+        self._gap_active = False
+        self._gap_base_silence = 0
+        self._gap_speech = 0
+        self._gap_buffer.clear()
 
 
 def _should_cut_segment(speech_duration: float, pause_duration: float) -> bool:
