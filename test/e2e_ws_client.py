@@ -6,12 +6,13 @@ import uuid
 import websockets
 
 WS_URL = "ws://localhost:8856/ast/v1"
-AUDIO_PATH = "data/120报警电话16k.wav"
-#AUDIO_PATH = "data/zhangsanfeng.wav"
+#AUDIO_PATH = "data/120报警电话16k.wav"
+AUDIO_PATH = "data/zhangsanfeng.wav"
 FRAME_SIZE = 1280  # 1280 bytes = 40ms
 INTERVAL = 0.04
 OUTPUT_FILE = "recognition_results.json"
-HOTWORDS = ""  # 握手帧热词，如 "张三疯,向钱看"
+HOTWORDS =  "张三疯|向钱看"  # 握手帧热词，如 "张三疯,向钱看"
+#HOTWORDS = ""
 
 
 def gen_trace_id():

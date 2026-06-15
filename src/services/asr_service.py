@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import logging
 import struct
 import re
@@ -21,6 +22,19 @@ _HALLUCINATION_BLACKLIST = [
 ]
 
 SAMPLE_RATE = 16000
+
+
+def _build_hotword_context(hotwords: str) -> str:
+    """将热词构建为系统提示词，多个热词以中文顿号分隔。
+
+    Qwen3-ASR 通过 chat 接口的 system 消息（"热词：xxx、yyy"）来注入热词偏置，
+    /audio/transcriptions 接口并不支持自定义 hotwords 字段（会被静默忽略，
+    在部分严格的 vLLM 构建上还会因未知表单字段而报错）。
+    """
+    words = list(dict.fromkeys(
+        w.strip() for w in hotwords.replace("|", ",").split(",") if w.strip()
+    ))
+    return f"热词：{'、'.join(words)}" if words else ""
 
 
 def _build_wav_bytes(pcm_int16: np.ndarray) -> bytes:
@@ -110,15 +124,29 @@ class VLLMASRClient:
 
     async def transcribe(self, audio: np.ndarray, hotwords: str = "") -> str:
         wav_bytes = _build_wav_bytes(audio)
-        files = {"file": ("audio.wav", wav_bytes, "audio/wav")}
-        data: dict = {"model": self._model_name}
-        if hotwords:
-            data["hotwords"] = hotwords
+        audio_b64 = base64.b64encode(wav_bytes).decode()
 
-        response = await self._client.post("/audio/transcriptions", files=files, data=data)
+        messages: list = []
+        hotword_ctx = _build_hotword_context(hotwords)
+        if hotword_ctx:
+            messages.append({"role": "system", "content": hotword_ctx})
+        messages.append({
+            "role": "user",
+            "content": [
+                {
+                    "type": "audio_url",
+                    "audio_url": {"url": f"data:audio/wav;base64,{audio_b64}"},
+                }
+            ],
+        })
+
+        response = await self._client.post(
+            "/chat/completions",
+            json={"model": self._model_name, "messages": messages},
+        )
         response.raise_for_status()
         result = response.json()
-        raw_text = result.get("text", "")
+        raw_text = result.get("choices", [{}])[0].get("message", {}).get("content", "")
         return _filter_hallucination(_parse_asr_response(raw_text))
 
     async def check_health(self) -> bool:
