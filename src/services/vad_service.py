@@ -59,6 +59,7 @@ class TenVADSession:
         self._gap_base_silence: int = 0
         self._gap_speech: int = 0
         self._gap_buffer: list[np.ndarray] = []
+        self._merged_frames: int = 0
 
     @property
     def in_speech(self) -> bool:
@@ -90,6 +91,14 @@ class TenVADSession:
         if not self._segment_frames:
             return None
         speech_duration = self._speech_frame_count * self.frame_duration
+        logger.debug(
+            "vad cut: flush speech=%.0fms silence=%.0fms(%df: orig=%d + merged=%d)",
+            speech_duration * 1000,
+            self._silence_frame_count * self.frame_duration * 1000,
+            self._silence_frame_count,
+            self._silence_frame_count - self._merged_frames,
+            self._merged_frames,
+        )
         return self._finalize_segment(speech_duration)
 
     def close(self) -> None:
@@ -154,11 +163,22 @@ class TenVADSession:
                     gap_speech_dur = self._gap_speech * self.frame_duration
                     if gap_speech_dur < MIN_SPEECH_DURATION:
                         # 合并：gap 语音算作静音，gap_buffer 丢弃
+                        logger.debug(
+                            "vad gap merge: dur=%.0fms < min=%.0fms "
+                            "base_silence=%df speech=%df",
+                            gap_speech_dur * 1000, MIN_SPEECH_DURATION * 1000,
+                            self._gap_base_silence, self._gap_speech,
+                        )
                         self._silence_frame_count = (
                             self._gap_base_silence + self._gap_speech
                         )
+                        self._merged_frames += self._gap_speech
                     else:
                         # 真实语音：flush gap_buffer 进 _segment_frames
+                        logger.debug(
+                            "vad gap keep: dur=%.0fms >= min=%.0fms flushing",
+                            gap_speech_dur * 1000, MIN_SPEECH_DURATION * 1000,
+                        )
                         self._segment_frames.extend(self._gap_buffer)
                         self._speech_frame_count += self._gap_speech
                         self._last_speech_end_sample = (
@@ -167,6 +187,7 @@ class TenVADSession:
                         self._gap_active = False
                         self._gap_base_silence = 0
                         self._silence_frame_count = 0
+                        self._merged_frames = 0
                     self._gap_speech = 0
                     self._gap_buffer.clear()
 
@@ -177,6 +198,10 @@ class TenVADSession:
                 pause_dur = self._silence_frame_count * self.frame_duration
 
                 if _should_cut_segment(speech_dur, pause_dur):
+                    _log_vad_cut(
+                        "silence", speech_dur, pause_dur,
+                        self._silence_frame_count, self._merged_frames,
+                    )
                     return self._finalize_segment(speech_dur)
 
         # 强制上限：用实际段长（含 gap buffer）做检查
@@ -194,6 +219,7 @@ class TenVADSession:
                     self._gap_speech = 0
                     self._gap_buffer.clear()
                 speech_dur = self._speech_frame_count * self.frame_duration
+                logger.debug("vad cut: max_speech speech=%.0fms", speech_dur * 1000)
                 return self._finalize_segment(speech_dur)
 
         return None
@@ -234,6 +260,25 @@ class TenVADSession:
         self._gap_base_silence = 0
         self._gap_speech = 0
         self._gap_buffer.clear()
+        self._merged_frames = 0
+
+
+def _log_vad_cut(
+    tag: str,
+    speech_dur: float,
+    pause_dur: float,
+    silence_frames: int,
+    merged_frames: int,
+) -> None:
+    logger.debug(
+        "vad cut: %s speech=%.0fms silence=%.0fms(%df: orig=%d + merged=%d)",
+        tag,
+        speech_dur * 1000,
+        pause_dur * 1000,
+        silence_frames,
+        silence_frames - merged_frames,
+        merged_frames,
+    )
 
 
 def _should_cut_segment(speech_duration: float, pause_duration: float) -> bool:

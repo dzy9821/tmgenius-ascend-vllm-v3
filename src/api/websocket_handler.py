@@ -212,7 +212,7 @@ async def _process_audio_frame(
     if rn is not None and rn_proc is not None:
         pcm = await rn.denoise(rn_proc, pcm)
 
-    logger.debug("audio frame: samples=%d online_total=%d", len(pcm), fs.online_total)
+    logger.debug("audio: %dms total=%dms", len(pcm) * 1000 // 16000, fs.online_total * 1000 // 16000)
     fs.online_buffer.append(pcm)
     fs.online_total += len(pcm)
     fs.abs_samples += len(pcm)
