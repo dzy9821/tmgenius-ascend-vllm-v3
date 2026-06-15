@@ -10,3 +10,5 @@ weights/Qwen3-ASR-0.6B
 weights/Qwen3-ASR-1.7B
 
 recognition_results.json
+
+*.txt

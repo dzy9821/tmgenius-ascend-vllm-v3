@@ -162,8 +162,8 @@ class TenVADSession:
                 if not self._gap_active:
                     self._gap_active = True
                     self._gap_base_silence = self._silence_frame_count
-                self._gap_speech = 0
-                self._gap_buffer.clear()
+                    self._gap_speech = 0
+                    self._gap_buffer.clear()
 
             if self._gap_active:
                 # gap 窗口内：帧进 _gap_buffer，不进 _segment_frames
@@ -192,6 +192,7 @@ class TenVADSession:
                             self._gap_base_silence + self._gap_speech
                         )
                         self._merged_frames += self._gap_speech
+                        self._gap_active = False
                     else:
                         # 真实语音：flush gap_buffer 进 _segment_frames
                         logger.debug(
@@ -252,10 +253,14 @@ class TenVADSession:
         return min(target_end, buffered_end)
 
     def _finalize_segment(self, speech_duration: float) -> Optional[dict]:
-        seg = self._extract_and_reset()
         if speech_duration < MIN_SPEECH_DURATION:
+            logger.debug(
+                "vad drop: speech=%.0fms < min=%.0fms discarded",
+                speech_duration * 1000, MIN_SPEECH_DURATION * 1000,
+            )
+            self._reset()
             return None
-        return seg
+        return self._extract_and_reset()
 
     def _extract_and_reset(self) -> dict:
         start = self._speech_start_sample
