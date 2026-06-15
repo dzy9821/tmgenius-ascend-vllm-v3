@@ -25,7 +25,7 @@ HOP_SIZE: int = _settings.vad_hop_size
 VAD_THRESHOLD: float = _settings.vad_threshold
 PAUSE_THRESHOLD: float = _settings.vad_min_speech
 MAX_SPEECH_DURATION: float = _settings.vad_max_speech
-MIN_SPEECH_DURATION: float = 0.3
+MIN_SPEECH_DURATION: float = 0.5
 SAMPLE_RATE = 16000
 
 
