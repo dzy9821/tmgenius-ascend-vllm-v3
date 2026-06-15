@@ -20,7 +20,7 @@ class Settings:
         # VAD 参数
         self.vad_hop_size: int = int(os.getenv("VAD_HOP_SIZE", "640"))
         self.vad_threshold: float = float(os.getenv("VAD_THRESHOLD", "0.5"))
-        self.vad_min_speech: float = float(os.getenv("VAD_MIN_SPEECH", "0.9"))
+        self.vad_min_speech: float = float(os.getenv("VAD_MIN_SPEECH", "0.8"))
         self.vad_max_speech: float = float(os.getenv("VAD_MAX_SPEECH", "60.0"))
         self.asr_pad_frames: int = int(os.getenv("ASR_PAD_FRAMES", "5"))
 
