@@ -98,6 +98,7 @@ def strip_trailing_punct(text: str) -> str:
 
 
 def _filter_hallucination(text: str, hotwords: str = "") -> str:
+    logger.debug("_filter_hallucination 过滤前: text=%r, hotwords=%r", text, hotwords)
     lower = text.lower()
     for phrase in _HALLUCINATION_BLACKLIST:
         if phrase in lower:
