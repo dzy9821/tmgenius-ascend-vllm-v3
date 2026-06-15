@@ -286,7 +286,7 @@ Online 与 Offline 两类结果共享同一条发送链路：
    - Online ASR 结果（`msgtype=Progressive`）即时推送，**推送前先进行幻觉文本过滤、再去除末尾的中英文标点符号**。Progressive 携带其所属语音段的 segId（与该段最终 sentence 相同）。首次 Progressive 结果的 `status` 为 `0`（兼作握手确认），后续为 `1`。收到结束帧后，立即清除音频缓冲，不再触发新的 Online 转写（尾帧由 Offline 统一处理）。  
    - Offline ASR + ITN 结果（`msgtype=sentence`）按 `segId` 顺序推送，确保文本时序与音频一致；客户端依据 segId 用 sentence 纠正并替换同段 Progressive。**有序投递通过 `next_seg_id_to_send` 指针 + `pending_sentences` 缓存实现**：当某个 `segId` 的 sentence 提前完成但前序 segment 尚未投递时，暂存于 `pending_sentences`；待前序投递完成后自动冲刷。  
    - **空段跳过保护**：若某个 segment 的离线 ASR 返回空文本（如音频开头的静音/噪声段），该 segment 不会生成 sentence 消息。  
-   - 收到结束帧后，服务端等待所有后台任务完成。所有结果均**即发即走（无延迟一拍的 hold-last 缓存）**：尾段 `sentence` 在投递时即被标记为终态，**直接携带 `status=2`** 作为终态信号，不再发送独立的空 payload 结束帧。兜底：若尾段无识别文本（静音/被过滤），服务端将**重发最后一条已推送的结果**并携带 `status=2`（内容与 segId 与前一条相同，客户端按 segId 替换展示即可，幂等）。  
+   - 收到结束帧后，服务端等待所有后台任务完成。所有结果均**即发即走（无延迟一拍的 hold-last 缓存）**：尾段 `sentence` 在投递时即被标记为终态，**直接携带 `status=2`** 作为终态信号。兜底：若尾段无识别文本（静音/被过滤），服务端**补发一个空 payload 的终态帧**（`status=2`、`ws=[]`，沿用最后一句的 segId），仅作结束信号；**不重发最后一句内容**，避免同一句被推送两次（先 `status=1` 后又 `status=2`）。客户端应按 segId 用先前到达的 `sentence` 文本作为最终展示，收到空 payload 的 `status=2` 帧时仅视为结束信号。  
    - **空结果过滤**：当 Online 或 Offline 模型返回空文本时，**不会向客户端推送消息**。Online 路径过滤空文本后直接不入队；Offline 路径若识别结果为空，调用 `_advance_reorder_pointer` 将该 segId 以 `None` 占位并推进 `next_seg_id_to_send` 指针，避免后续段被永久阻塞，但不生成 sentence 消息。  
    - **幻觉文本过滤（两级 + 规则）**：通过 `_filter_hallucination()` 进行**大小写不敏感的子串匹配**，命中已知幻觉模式（含「以 `"热词："` 开头」规则）的文本将被置为空并跳过推送。
 

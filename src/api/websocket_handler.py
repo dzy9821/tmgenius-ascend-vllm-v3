@@ -384,7 +384,12 @@ async def _result_sender(
             logger.debug("sender finalize: sent_final=%s last_sent_seg=%s",
                          sent_final, last_sent.seg_id if last_sent else None)
             if not sent_final and last_sent is not None:
-                await _send_msg(websocket, last_sent, status=2, sid=sid, trace_id=trace_id)
+                # 尾段无识别文本（静音/被过滤）时的兜底：仅补发一个空 payload 的
+                # 终态帧（status=2，ws=[]）作为结束信号，沿用最后一句的 segId。
+                # 不重发最后一句内容，避免同一句被推送两次（status=1 后又 status=2）。
+                term = QueueMsg(last_sent.seg_id, last_sent.msgtype, "",
+                                last_sent.bg, last_sent.ed, final=True)
+                await _send_msg(websocket, term, status=2, sid=sid, trace_id=trace_id)
             break
         status = 2 if item.final else (0 if last_sent is None else 1)
         await _send_msg(websocket, item, status=status, sid=sid, trace_id=trace_id)

@@ -33,7 +33,10 @@ class TenVADSession:
     def __init__(self, sid: str) -> None:
         self._sid = sid
         self._vad = TenVad(hop_size=HOP_SIZE, threshold=VAD_THRESHOLD)
-        logger.info("TenVAD instance created: sid=%s, vad_id=%s", sid, id(self._vad))
+        logger.info(
+            "TenVAD instance created: sid=%s, vad_id=%s, hop=%d, threshold=%.2f",
+            sid, id(self._vad), HOP_SIZE, VAD_THRESHOLD,
+        )
         self.hop_size = HOP_SIZE
         self.frame_duration = self.hop_size / SAMPLE_RATE
 
@@ -60,6 +63,13 @@ class TenVADSession:
         self._gap_speech: int = 0
         self._gap_buffer: list[np.ndarray] = []
         self._merged_frames: int = 0
+
+        # diagnostics: aggregate prob/flag stats over ~1s windows
+        self._diag_window: int = max(1, round(1.0 / self.frame_duration))
+        self._diag_frames: int = 0
+        self._diag_speech: int = 0
+        self._diag_prob_sum: float = 0.0
+        self._diag_prob_max: float = 0.0
 
     @property
     def in_speech(self) -> bool:
@@ -114,6 +124,25 @@ class TenVADSession:
         prob, flag_i = await asyncio.to_thread(self._vad.process, frame)
         self._total_samples += self.hop_size
         flag = int(flag_i)
+
+        # diagnostics: per-frame prob/flag, aggregated over ~1s windows
+        self._diag_frames += 1
+        self._diag_speech += flag
+        self._diag_prob_sum += float(prob)
+        if float(prob) > self._diag_prob_max:
+            self._diag_prob_max = float(prob)
+        if self._diag_frames >= self._diag_window:
+            logger.debug(
+                "vad diag: frames=%d speech=%d prob avg=%.3f max=%.3f "
+                "thr=%.2f in_speech=%s seg_frames=%d",
+                self._diag_frames, self._diag_speech,
+                self._diag_prob_sum / self._diag_frames, self._diag_prob_max,
+                VAD_THRESHOLD, self._in_speech, len(self._segment_frames),
+            )
+            self._diag_frames = 0
+            self._diag_speech = 0
+            self._diag_prob_sum = 0.0
+            self._diag_prob_max = 0.0
 
         if flag == 1 and not self._in_speech:
             self._pre_snapshot = list(self._pre_buffer)

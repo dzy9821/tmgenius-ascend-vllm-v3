@@ -97,7 +97,7 @@ def strip_trailing_punct(text: str) -> str:
     return text.rstrip(_TRAILING_PUNCT)
 
 
-def _filter_hallucination(text: str) -> str:
+def _filter_hallucination(text: str, hotwords: str = "") -> str:
     lower = text.lower()
     for phrase in _HALLUCINATION_BLACKLIST:
         if phrase in lower:
@@ -105,6 +105,13 @@ def _filter_hallucination(text: str) -> str:
     # 规则：以 "热词：" 开头的文本视为热词 prompt 泄漏，丢弃
     if text.lstrip().startswith("热词："):
         return ""
+    # 规则：如果热词全部出现在 ASR 返回结果中，判定为幻觉（模型原样复述热词列表）
+    if hotwords and text:
+        words = list(dict.fromkeys(
+            w.strip() for w in hotwords.replace("|", ",").split(",") if w.strip()
+        ))
+        if words and all(w in lower for w in (w.lower() for w in words)):
+            return ""
     return text
 
 
@@ -147,7 +154,7 @@ class VLLMASRClient:
         response.raise_for_status()
         result = response.json()
         raw_text = result.get("choices", [{}])[0].get("message", {}).get("content", "")
-        return _filter_hallucination(_parse_asr_response(raw_text))
+        return _filter_hallucination(_parse_asr_response(raw_text), hotwords)
 
     async def check_health(self) -> bool:
         try:
