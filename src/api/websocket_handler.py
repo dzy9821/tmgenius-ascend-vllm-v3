@@ -4,6 +4,7 @@ import asyncio
 import base64
 import json
 import logging
+import re
 import uuid
 from dataclasses import dataclass, field
 from typing import Any, Optional
@@ -13,7 +14,8 @@ from fastapi import WebSocket
 
 from src.config import get_settings
 from src.core.logging import trace_id_var
-from src.services.asr_service import get_online_client, get_offline_client
+from src.core.opus_decoder import OpusDecoder
+from src.services.asr_service import get_online_client, get_offline_client, strip_trailing_punct
 from src.services.vad_service import TenVADSession
 
 logger = logging.getLogger(__name__)
@@ -55,6 +57,21 @@ class FrameState:
     online_epoch: int = 0
     online_busy: bool = False
     seg_id: int = 0
+    # 绝对样本时钟（自连接开始累计），用于计算 bg/ed
+    abs_samples: int = 0
+    seg_start_abs: int = 0
+    # 每连接独立的 Opus 解码器（仅当 encoding=="opus" 时惰性创建）
+    opus_decoder: Optional[OpusDecoder] = None
+
+
+def _merge_hotwords(default: str, user: str) -> str:
+    """按 , 或 | 切分默认热词与客户端热词，去重合并（保留顺序），以逗号连接。"""
+    seen: list[str] = []
+    for part in re.split(r"[,|]", f"{default},{user}"):
+        w = part.strip()
+        if w and w not in seen:
+            seen.append(w)
+    return ",".join(seen)
 
 
 @dataclass
@@ -105,8 +122,8 @@ async def handle_websocket(websocket: WebSocket) -> None:
         status: int = header.get("status", 0)
 
         payload = frame.get("payload", {})
-        user_hotwords: str = payload.get("hotwords", "") or ""
-        hotwords: str = user_hotwords if user_hotwords else settings.hotwords
+        user_hotwords: str = payload.get("text", {}).get("text", "") or ""
+        hotwords: str = _merge_hotwords(settings.hotwords, user_hotwords)
 
         sender_task = asyncio.create_task(
             _result_sender(websocket, result_queue, sid, trace_id)
@@ -157,6 +174,8 @@ async def handle_websocket(websocket: WebSocket) -> None:
             except (asyncio.CancelledError, Exception):
                 pass
         vad.close()
+        if fs.opus_decoder is not None:
+            fs.opus_decoder.close()
         sm.release()
 
 
@@ -174,12 +193,19 @@ async def _process_audio_frame(
     reorder: ReorderState,
 ) -> None:
     payload = frame.get("payload", {})
-    audio_b64: str = payload.get("audio", {}).get("audio", "")
+    audio_obj = payload.get("audio", {})
+    audio_b64: str = audio_obj.get("audio", "")
     if not audio_b64:
         return
 
-    pcm_bytes = base64.b64decode(audio_b64)
-    pcm = np.frombuffer(pcm_bytes, dtype=np.int16).copy()
+    raw_bytes = base64.b64decode(audio_b64)
+    encoding = (audio_obj.get("encoding") or "").lower()
+    if encoding == "opus":
+        if fs.opus_decoder is None:
+            fs.opus_decoder = OpusDecoder(sample_rate=16000, channels=1)
+        pcm = fs.opus_decoder.decode(raw_bytes)
+    else:
+        pcm = np.frombuffer(raw_bytes, dtype=np.int16).copy()
     if len(pcm) == 0:
         return
 
@@ -189,6 +215,7 @@ async def _process_audio_frame(
     logger.debug("audio frame: samples=%d online_total=%d", len(pcm), fs.online_total)
     fs.online_buffer.append(pcm)
     fs.online_total += len(pcm)
+    fs.abs_samples += len(pcm)
 
     segs = await vad.feed_audio(pcm)
 
@@ -216,12 +243,14 @@ def _do_trigger_offline(
     if is_final:
         reorder.final_seg_id = fs.seg_id
 
+    bg = start_sample // 16
+    ed = end_sample // 16
     logger.debug(
         "offline trigger: seg_id=%d bg=%d ed=%d is_final=%s",
-        fs.seg_id, start_sample // 16, end_sample // 16, is_final,
+        fs.seg_id, bg, ed, is_final,
     )
     task = asyncio.create_task(
-        _do_offline_asr(audio, fs.seg_id, hotwords, result_queue, reorder)
+        _do_offline_asr(audio, fs.seg_id, bg, ed, hotwords, result_queue, reorder)
     )
     all_tasks.append(task)
 
@@ -231,6 +260,7 @@ def _do_trigger_offline(
     fs.online_epoch += 1
     fs.online_busy = False
     fs.seg_id += 1
+    fs.seg_start_abs = fs.abs_samples
 
 
 def _maybe_trigger_online(
@@ -247,13 +277,15 @@ def _maybe_trigger_online(
     epoch_snap = fs.online_epoch
     audio_snap = np.concatenate(fs.online_buffer).copy()
     seg_id_snap = fs.seg_id
+    bg_snap = fs.seg_start_abs // 16
+    ed_snap = fs.abs_samples // 16
     fs.online_busy = True
     fs.online_last_trigger = fs.online_total
 
     logger.debug("online trigger: seg_id=%d samples=%d epoch=%d", seg_id_snap, len(audio_snap), epoch_snap)
 
     task = asyncio.create_task(
-        _do_online_asr(audio_snap, seg_id_snap, epoch_snap, hotwords, result_queue, fs)
+        _do_online_asr(audio_snap, seg_id_snap, epoch_snap, bg_snap, ed_snap, hotwords, result_queue, fs)
     )
     all_tasks.append(task)
 
@@ -264,6 +296,8 @@ async def _do_online_asr(
     audio: np.ndarray,
     seg_id_snap: int,
     epoch_snap: int,
+    bg: int,
+    ed: int,
     hotwords: str,
     result_queue: asyncio.Queue,
     fs: FrameState,
@@ -273,9 +307,11 @@ async def _do_online_asr(
         if fs.online_epoch != epoch_snap:
             logger.debug("online stale: seg=%d epoch=%d current=%d", seg_id_snap, epoch_snap, fs.online_epoch)
             return
+        # 去除末尾标点，改善前端实时展示效果
+        text = strip_trailing_punct(text)
         if text:
             logger.debug("online result: seg=%d epoch=%d text=%s", seg_id_snap, epoch_snap, text)
-            await result_queue.put(QueueMsg(seg_id_snap, "Progressive", text, 0, 0))
+            await result_queue.put(QueueMsg(seg_id_snap, "Progressive", text, bg, ed))
     finally:
         if fs.online_epoch == epoch_snap:
             fs.online_busy = False
@@ -284,6 +320,8 @@ async def _do_online_asr(
 async def _do_offline_asr(
     audio: np.ndarray,
     seg_id: int,
+    bg: int,
+    ed: int,
     hotwords: str,
     result_queue: asyncio.Queue,
     reorder: ReorderState,
@@ -296,31 +334,34 @@ async def _do_offline_asr(
             except Exception as exc:
                 logger.warning("ITN failed seg_id=%d: %s", seg_id, exc)
         logger.debug("offline result: seg=%d text=%s", seg_id, text or "")
-        await _advance_reorder_pointer(seg_id, text or None, result_queue, reorder)
+        await _advance_reorder_pointer(seg_id, text or None, bg, ed, result_queue, reorder)
     except Exception as exc:
         logger.exception("Offline ASR error seg_id=%d: %s", seg_id, exc)
-        await _advance_reorder_pointer(seg_id, None, result_queue, reorder)
+        await _advance_reorder_pointer(seg_id, None, bg, ed, result_queue, reorder)
 
 
 async def _advance_reorder_pointer(
     seg_id: int,
     text: Optional[str],
+    bg: int,
+    ed: int,
     result_queue: asyncio.Queue,
     reorder: ReorderState,
 ) -> None:
     async with reorder.lock:
-        reorder.pending[seg_id] = text
+        reorder.pending[seg_id] = (text, bg, ed) if text else None
         logger.debug("reorder: recv seg=%d text=%s next=%d final_seg=%s",
                      seg_id, text or "", reorder.next_seg_id_to_send, reorder.final_seg_id)
         while reorder.next_seg_id_to_send in reorder.pending:
-            t = reorder.pending.pop(reorder.next_seg_id_to_send)
-            if t:
+            entry = reorder.pending.pop(reorder.next_seg_id_to_send)
+            if entry:
+                t, t_bg, t_ed = entry
                 is_final = reorder.next_seg_id_to_send == reorder.final_seg_id
                 logger.debug("reorder: emit seg=%d next=%d final=%s",
                              reorder.next_seg_id_to_send, reorder.next_seg_id_to_send + 1, is_final)
                 await result_queue.put(
                     QueueMsg(
-                        reorder.next_seg_id_to_send, "sentence", t, 0, 0,
+                        reorder.next_seg_id_to_send, "sentence", t, t_bg, t_ed,
                         final=is_final,
                     )
                 )
@@ -374,7 +415,7 @@ async def _send_msg(
                 "segId": msg.seg_id,
                 "bg": msg.bg,
                 "ed": msg.ed,
-                "ws": [{"cw": [{"w": msg.text}]}] if msg.text else [],
+                "ws": [{"cw": [{"w": msg.text, "rl": 0}]}] if msg.text else [],
             }
         },
     }

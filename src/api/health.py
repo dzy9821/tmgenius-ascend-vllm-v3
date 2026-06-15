@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Query, Request
 from fastapi.responses import StreamingResponse
 
 from src.core.logging import log_buffer
@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1")
 
-_BACKLOG_LINES = 50
+_DEFAULT_BACKLOG_LINES = 50
 _KEEPALIVE_INTERVAL = 30
 
 
@@ -31,12 +31,16 @@ async def ready(request: Request) -> dict:
 
 
 @router.get("/logs/stream")
-async def logs_stream(request: Request) -> StreamingResponse:
+async def logs_stream(
+    request: Request,
+    backlog: int = Query(_DEFAULT_BACKLOG_LINES, ge=0, le=2000),
+) -> StreamingResponse:
     async def _generate():
         q = log_buffer.subscribe()
         try:
-            for line in log_buffer.get_recent(_BACKLOG_LINES):
-                yield f"data: {line}\n\n"
+            if backlog > 0:
+                for line in log_buffer.get_recent(backlog):
+                    yield f"data: {line}\n\n"
 
             while True:
                 if await request.is_disconnected():

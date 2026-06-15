@@ -74,11 +74,23 @@ def _parse_asr_response(content: str) -> str:
     return text
 
 
+# 末尾标点（中英文）字符集，用于 Online Progressive 结果展示优化
+_TRAILING_PUNCT = "，。！？、；：,.!?;: \t　…—"
+
+
+def strip_trailing_punct(text: str) -> str:
+    """去除末尾的中英文标点符号，改善前端实时展示效果（仅 Online 阶段使用）。"""
+    return text.rstrip(_TRAILING_PUNCT)
+
+
 def _filter_hallucination(text: str) -> str:
     lower = text.lower()
     for phrase in _HALLUCINATION_BLACKLIST:
         if phrase in lower:
             return ""
+    # 规则：以 "热词：" 开头的文本视为热词 prompt 泄漏，丢弃
+    if text.lstrip().startswith("热词："):
+        return ""
     return text
 
 

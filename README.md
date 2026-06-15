@@ -507,7 +507,7 @@ python test/e2e_ws_client.py
 | :--- | :--- | :--- |
 | `WS_HOST` | `0.0.0.0` | 服务监听地址。 |
 | `WS_PORT` | `8856` | 服务监听端口。 |
-| `LOG_LEVEL` | `INFO` | 日志级别（`DEBUG` / `INFO` / `WARNING` / `ERROR`）。 |
+| `LOG_LEVEL` | `DEBUG` | 日志级别（`DEBUG` / `INFO` / `WARNING` / `ERROR`）。 |
 | `MAX_CONNECTIONS` | `64` | 最大并发 WebSocket 连接数，超限时直接拒绝（close code 1013）。 |
 | `HANDSHAKE_TIMEOUT` | `5` | 握手超时（秒），连接建立后须在此时间内收到首帧。 |
 | `WS_PING_INTERVAL` | `5` | WebSocket Ping 间隔（秒）。 |
