@@ -76,6 +76,10 @@ class TenVADSession:
         return self._in_speech
 
     @property
+    def silence_duration(self) -> float:
+        return self._silence_frame_count * self.frame_duration
+
+    @property
     def speech_start_sample(self) -> int:
         return self._speech_start_sample
 
