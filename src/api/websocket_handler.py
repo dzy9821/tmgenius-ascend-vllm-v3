@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 
 FINALIZE_SENTINEL = object()
 ONLINE_TRIGGER_SAMPLES: int = get_settings().online_trigger_ms * 16  # 400ms * 16 = 6400
+ONLINE_VAD_PAUSE_SEC: float = get_settings().online_vad_pause_ms / 1000.0  # 500ms = 0.5s
 
 _itn_service: Any = None
 _rnnoise_service_ref: Any = None
@@ -57,6 +58,10 @@ class FrameState:
     online_epoch: int = 0
     online_busy: bool = False
     seg_id: int = 0
+    # Online VAD 子分段：cursor 之后的音频才送入在线 ASR
+    online_cut_cursor: int = 0
+    online_last_text: str = ""
+    online_accumulated_text: str = ""
     # 绝对样本时钟（自连接开始累计），用于计算 bg/ed
     abs_samples: int = 0
     seg_start_abs: int = 0
@@ -226,6 +231,20 @@ async def _process_audio_frame(
             fs, hotwords, result_queue, reorder, all_tasks,
         )
 
+    # Online VAD 子分段：静音 ≥ 0.5s 时推进 cursor，后续在线推理只用新音频
+    if vad.in_speech and vad.silence_duration >= ONLINE_VAD_PAUSE_SEC:
+        silence_samples = int(vad.silence_duration * 16000)
+        if fs.online_total - fs.online_cut_cursor > silence_samples:
+            logger.debug("online vad cut: cursor=%d -> %d epoch=%d",
+                         fs.online_cut_cursor, fs.online_total, fs.online_epoch)
+            if fs.online_last_text:
+                sep = "，" if fs.online_last_text.rstrip()[-1:] not in "，。！？、；：,.!?;:" else ""
+                fs.online_accumulated_text = fs.online_last_text + sep
+            fs.online_cut_cursor = fs.online_total
+            fs.online_epoch += 1
+            fs.online_last_trigger = fs.online_total
+            fs.online_busy = False
+
     _maybe_trigger_online(fs, hotwords, result_queue, all_tasks)
 
 
@@ -259,6 +278,9 @@ def _do_trigger_offline(
     fs.online_last_trigger = 0
     fs.online_epoch += 1
     fs.online_busy = False
+    fs.online_cut_cursor = 0
+    fs.online_last_text = ""
+    fs.online_accumulated_text = ""
     fs.seg_id += 1
     fs.seg_start_abs = fs.abs_samples
 
@@ -275,7 +297,8 @@ def _maybe_trigger_online(
         return
 
     epoch_snap = fs.online_epoch
-    audio_snap = np.concatenate(fs.online_buffer).copy()
+    full_audio = np.concatenate(fs.online_buffer)
+    audio_snap = full_audio[fs.online_cut_cursor:].copy()
     seg_id_snap = fs.seg_id
     bg_snap = fs.seg_start_abs // 16
     ed_snap = fs.abs_samples // 16
@@ -305,11 +328,19 @@ async def _do_online_asr(
     try:
         text = await get_online_client().transcribe(audio, hotwords="")
         if fs.online_epoch != epoch_snap:
+            # 过期结果：保存文本供后续子分段拼接
+            if text:
+                text = strip_trailing_punct(text)
+                if text:
+                    fs.online_last_text = text
             logger.debug("online stale: seg=%d epoch=%d current=%d", seg_id_snap, epoch_snap, fs.online_epoch)
             return
-        # 去除末尾标点，改善前端实时展示效果
         text = strip_trailing_punct(text)
         if text:
+            fs.online_last_text = text
+            # 拼接前一个在线子分段的累积文本
+            if fs.online_accumulated_text:
+                text = fs.online_accumulated_text + text
             logger.debug("online result: seg=%d epoch=%d text=%s", seg_id_snap, epoch_snap, text)
             await result_queue.put(QueueMsg(seg_id_snap, "Progressive", text, bg, ed))
     finally:

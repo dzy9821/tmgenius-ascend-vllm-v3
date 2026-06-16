@@ -26,6 +26,7 @@ class Settings:
 
         # Online ASR 触发阈值
         self.online_trigger_ms: int = int(os.getenv("ONLINE_TRIGGER_MS", "400"))
+        self.online_vad_pause_ms: int = int(os.getenv("ONLINE_VAD_PAUSE_MS", "500"))
 
         # ITN 多进程池
         self.itn_workers: int = int(os.getenv("ITN_WORKERS", "8"))

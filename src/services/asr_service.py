@@ -14,13 +14,6 @@ from src.config import get_settings
 
 logger = logging.getLogger(__name__)
 
-_HALLUCINATION_BLACKLIST = [
-    "transcribe the audio to text accurately",
-    "pay special attention to these words",
-    "thank you for watching",
-    "please subscribe",
-]
-
 SAMPLE_RATE = 16000
 
 
@@ -98,21 +91,20 @@ def strip_trailing_punct(text: str) -> str:
 
 
 def _filter_hallucination(text: str, hotwords: str = "") -> str:
+    """如果离线 ASR 结果以热词列表中相邻两个热词开头，视为 prompt 泄漏，返回空字符串。"""
     logger.debug("_filter_hallucination 过滤前: text=%r, hotwords=%r", text, hotwords)
-    lower = text.lower()
-    for phrase in _HALLUCINATION_BLACKLIST:
-        if phrase in lower:
-            return ""
-    # 规则：以 "热词：" 开头的文本视为热词 prompt 泄漏，丢弃
-    if text.lstrip().startswith("热词："):
-        return ""
-    # 规则：如果热词全部出现在 ASR 返回结果中，判定为幻觉（模型原样复述热词列表）
-    if hotwords and text:
-        words = list(dict.fromkeys(
-            w.strip() for w in hotwords.replace("|", ",").split(",") if w.strip()
-        ))
-        if words and all(w in lower for w in (w.lower() for w in words)):
-            return ""
+    if not text or not hotwords:
+        return text
+    words = [w.strip() for w in hotwords.replace("|", ",").split(",") if w.strip()]
+    if len(words) < 2:
+        return text
+    stripped = text.lstrip()
+    for i in range(len(words) - 1):
+        a, b = words[i], words[i + 1]
+        for sep in (",", "，", "、"):
+            if stripped.startswith(f"{a}{sep}{b}"):
+                logger.debug("_filter_hallucination 命中: text starts with %r", f"{a}{sep}{b}")
+                return ""
     return text
 
 
