@@ -11,11 +11,11 @@ class Settings:
         # WebSocket 服务
         self.ws_host: str = os.getenv("WS_HOST", "0.0.0.0")
         self.ws_port: int = int(os.getenv("WS_PORT", "8856"))
-        self.log_level: str = os.getenv("LOG_LEVEL", "DEBUG")
+        self.log_level: str = os.getenv("LOG_LEVEL", "INFO")
         self.max_connections: int = int(os.getenv("MAX_CONNECTIONS", "64"))
-        self.handshake_timeout: float = float(os.getenv("HANDSHAKE_TIMEOUT", "5"))
-        self.ws_ping_interval: int = int(os.getenv("WS_PING_INTERVAL", "5"))
-        self.ws_ping_timeout: int = int(os.getenv("WS_PING_TIMEOUT", "20"))
+        self.handshake_timeout: float = float(os.getenv("HANDSHAKE_TIMEOUT", "300"))
+        self.ws_ping_interval: int = int(os.getenv("WS_PING_INTERVAL", "10"))
+        self.ws_ping_timeout: int = int(os.getenv("WS_PING_TIMEOUT", "300"))
 
         # VAD 参数
         self.vad_hop_size: int = int(os.getenv("VAD_HOP_SIZE", "640"))
@@ -69,7 +69,7 @@ class Settings:
         )
 
         # RNNoise 降噪
-        _rn = os.getenv("RNNOISE_ENABLED", "true").lower()
+        _rn = os.getenv("RNNOISE_ENABLED", "false").lower()
         self.rnnoise_enabled: bool = _rn not in ("false", "0", "no")
         self.rnnoise_reduce_db: float = float(os.getenv("RNNOISE_REDUCE_DB", "12.0"))
         self.rnnoise_workers: int = int(os.getenv("RNNOISE_WORKERS", "4"))
