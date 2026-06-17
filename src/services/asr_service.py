@@ -91,20 +91,27 @@ def strip_trailing_punct(text: str) -> str:
 
 
 def _filter_hallucination(text: str, hotwords: str = "") -> str:
-    """如果离线 ASR 结果以热词列表中相邻两个热词开头，视为 prompt 泄漏，返回空字符串。"""
+    """过滤离线 ASR 的 prompt 泄漏幻觉。
+
+    规则：
+    1. 以 "热词：" 开头 → 视为 system prompt 泄漏，返回 ""
+    2. 以热词列表中相邻两个热词（顿号分隔）开头 → 返回 ""
+    """
     logger.debug("_filter_hallucination 过滤前: text=%r, hotwords=%r", text, hotwords)
     if not text or not hotwords:
         return text
+    stripped = text.lstrip()
+    if stripped.startswith("热词："):
+        logger.debug("_filter_hallucination 命中: starts with 热词：")
+        return ""
     words = [w.strip() for w in hotwords.replace("|", ",").split(",") if w.strip()]
     if len(words) < 2:
         return text
-    stripped = text.lstrip()
     for i in range(len(words) - 1):
         a, b = words[i], words[i + 1]
-        for sep in (",", "，", "、"):
-            if stripped.startswith(f"{a}{sep}{b}"):
-                logger.debug("_filter_hallucination 命中: text starts with %r", f"{a}{sep}{b}")
-                return ""
+        if stripped.startswith(f"{a}、{b}"):
+            logger.debug("_filter_hallucination 命中: text starts with %r", f"{a}、{b}")
+            return ""
     return text
 
 
