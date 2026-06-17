@@ -45,6 +45,9 @@ class Settings:
         self.online_api_base: str = os.getenv(
             "ONLINE_API_BASE", "http://127.0.0.1:15004/v1"
         )
+        self.online_api_base_2: str = os.getenv(
+            "ONLINE_API_BASE_2", "http://127.0.0.1:15006/v1"
+        )
         self.offline_model_name: str = os.getenv(
             "OFFLINE_MODEL_NAME", "Qwen3-ASR-1.7B"
         )
