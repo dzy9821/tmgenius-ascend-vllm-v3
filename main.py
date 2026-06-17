@@ -3,6 +3,10 @@ import logging
 import sys
 from contextlib import asynccontextmanager
 
+import uvloop
+
+uvloop.install()
+
 from fastapi import FastAPI
 from prometheus_client import make_asgi_app
 
