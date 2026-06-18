@@ -39,18 +39,20 @@ class Settings:
         )
 
         # vLLM 配置（逗号分隔多个实例）
+        # 默认: 3x 1.7B (离线, 15002~15006) + 6x 0.6B (在线, 15008~15018)
         self.offline_api_bases: list[str] = [
             u.strip() for u in os.getenv(
                 "OFFLINE_API_BASES",
-                "http://127.0.0.1:15002/v1,http://127.0.0.1:15004/v1",
+                "http://127.0.0.1:15002/v1,http://127.0.0.1:15004/v1,"
+                "http://127.0.0.1:15006/v1",
             ).split(",") if u.strip()
         ]
         self.online_api_bases: list[str] = [
             u.strip() for u in os.getenv(
                 "ONLINE_API_BASES",
-                "http://127.0.0.1:15006/v1,http://127.0.0.1:15008/v1,"
-                "http://127.0.0.1:15010/v1,http://127.0.0.1:15012/v1,"
-                "http://127.0.0.1:15014/v1",
+                "http://127.0.0.1:15008/v1,http://127.0.0.1:15010/v1,"
+                "http://127.0.0.1:15012/v1,http://127.0.0.1:15014/v1,"
+                "http://127.0.0.1:15016/v1,http://127.0.0.1:15018/v1",
             ).split(",") if u.strip()
         ]
         _sched = os.getenv("SCHEDULE_STRATEGY", "least_outstanding").lower()
