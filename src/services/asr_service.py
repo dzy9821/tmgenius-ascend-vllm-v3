@@ -151,10 +151,9 @@ class VLLMASRClient:
         self._outstanding: int = 0
 
     async def transcribe(self, audio: np.ndarray, hotwords: str = "") -> str:
-        messages = await asyncio.to_thread(_prepare_transcribe_request, audio, hotwords)
-
-        self._outstanding += 1
         try:
+            messages = await asyncio.to_thread(_prepare_transcribe_request, audio, hotwords)
+
             response = await self._client.post(
                 "/chat/completions",
                 json={"model": self._model_name, "messages": messages},
@@ -198,12 +197,16 @@ def _init_clients() -> None:
 
 def get_online_client() -> VLLMASRClient:
     _init_clients()
-    return min(_online_clients, key=lambda c: c._outstanding)
+    client = min(_online_clients, key=lambda c: c._outstanding)
+    client._outstanding += 1
+    return client
 
 
 def get_offline_client() -> VLLMASRClient:
     _init_clients()
-    return min(_offline_clients, key=lambda c: c._outstanding)
+    client = min(_offline_clients, key=lambda c: c._outstanding)
+    client._outstanding += 1
+    return client
 
 
 async def close_asr_clients() -> None:
