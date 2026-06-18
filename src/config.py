@@ -38,16 +38,21 @@ class Settings:
             os.getenv("MP_QUEUE_LOG_INTERVAL_SEC", "10")
         )
 
-        # vLLM 配置
-        self.offline_api_base: str = os.getenv(
-            "OFFLINE_API_BASE", "http://127.0.0.1:15002/v1"
-        )
-        self.online_api_base: str = os.getenv(
-            "ONLINE_API_BASE", "http://127.0.0.1:15004/v1"
-        )
-        self.online_api_base_2: str = os.getenv(
-            "ONLINE_API_BASE_2", "http://127.0.0.1:15006/v1"
-        )
+        # vLLM 配置（逗号分隔多个实例，调度策略为 least-outstanding）
+        self.offline_api_bases: list[str] = [
+            u.strip() for u in os.getenv(
+                "OFFLINE_API_BASES",
+                "http://127.0.0.1:15002/v1,http://127.0.0.1:15004/v1",
+            ).split(",") if u.strip()
+        ]
+        self.online_api_bases: list[str] = [
+            u.strip() for u in os.getenv(
+                "ONLINE_API_BASES",
+                "http://127.0.0.1:15006/v1,http://127.0.0.1:15008/v1,"
+                "http://127.0.0.1:15010/v1,http://127.0.0.1:15012/v1,"
+                "http://127.0.0.1:15014/v1",
+            ).split(",") if u.strip()
+        ]
         self.offline_model_name: str = os.getenv(
             "OFFLINE_MODEL_NAME", "Qwen3-ASR-1.7B"
         )

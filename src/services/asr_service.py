@@ -5,8 +5,6 @@ import base64
 import logging
 import struct
 import re
-from functools import lru_cache
-from typing import Optional
 
 import httpx
 import numpy as np
@@ -150,18 +148,23 @@ class VLLMASRClient:
             timeout=httpx.Timeout(60.0),
             trust_env=False,
         )
+        self._outstanding: int = 0
 
     async def transcribe(self, audio: np.ndarray, hotwords: str = "") -> str:
         messages = await asyncio.to_thread(_prepare_transcribe_request, audio, hotwords)
 
-        response = await self._client.post(
-            "/chat/completions",
-            json={"model": self._model_name, "messages": messages},
-        )
-        response.raise_for_status()
-        result = response.json()
-        raw_text = result.get("choices", [{}])[0].get("message", {}).get("content", "")
-        return _filter_hallucination(_parse_asr_response(raw_text), hotwords)
+        self._outstanding += 1
+        try:
+            response = await self._client.post(
+                "/chat/completions",
+                json={"model": self._model_name, "messages": messages},
+            )
+            response.raise_for_status()
+            result = response.json()
+            raw_text = result.get("choices", [{}])[0].get("message", {}).get("content", "")
+            return _filter_hallucination(_parse_asr_response(raw_text), hotwords)
+        finally:
+            self._outstanding -= 1
 
     async def check_health(self) -> bool:
         try:
@@ -175,38 +178,37 @@ class VLLMASRClient:
 
 
 _online_clients: list[VLLMASRClient] = []
-_online_rr_counter: int = 0
+_offline_clients: list[VLLMASRClient] = []
 
 
-def _init_online_clients() -> list[VLLMASRClient]:
-    global _online_clients
-    if not _online_clients:
-        s = get_settings()
-        _online_clients = [
-            VLLMASRClient(s.online_api_base, s.online_model_name, s.vllm_api_key),
-            VLLMASRClient(s.online_api_base_2, s.online_model_name, s.vllm_api_key),
-        ]
-    return _online_clients
+def _init_clients() -> None:
+    global _online_clients, _offline_clients
+    if _online_clients or _offline_clients:
+        return
+    s = get_settings()
+    _online_clients = [
+        VLLMASRClient(url, s.online_model_name, s.vllm_api_key)
+        for url in s.online_api_bases
+    ]
+    _offline_clients = [
+        VLLMASRClient(url, s.offline_model_name, s.vllm_api_key)
+        for url in s.offline_api_bases
+    ]
 
 
 def get_online_client() -> VLLMASRClient:
-    global _online_rr_counter
-    clients = _init_online_clients()
-    client = clients[_online_rr_counter % 2]
-    _online_rr_counter += 1
-    return client
+    _init_clients()
+    return min(_online_clients, key=lambda c: c._outstanding)
 
 
-@lru_cache(maxsize=1)
 def get_offline_client() -> VLLMASRClient:
-    s = get_settings()
-    return VLLMASRClient(s.offline_api_base, s.offline_model_name, s.vllm_api_key)
+    _init_clients()
+    return min(_offline_clients, key=lambda c: c._outstanding)
 
 
 async def close_asr_clients() -> None:
-    for clients in (_online_clients, [get_offline_client()]):
-        for client in clients:
-            try:
-                await client.close()
-            except Exception:
-                pass
+    for client in _online_clients + _offline_clients:
+        try:
+            await client.close()
+        except Exception:
+            pass
