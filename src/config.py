@@ -25,7 +25,7 @@ class Settings:
         self.asr_pad_frames: int = int(os.getenv("ASR_PAD_FRAMES", "5"))
 
         # Online ASR 触发阈值
-        self.online_trigger_ms: int = int(os.getenv("ONLINE_TRIGGER_MS", "400"))
+        self.online_trigger_ms: int = int(os.getenv("ONLINE_TRIGGER_MS", "200"))
         self.online_vad_pause_ms: int = int(os.getenv("ONLINE_VAD_PAUSE_MS", "500"))
 
         # ITN 多进程池
@@ -38,7 +38,7 @@ class Settings:
             os.getenv("MP_QUEUE_LOG_INTERVAL_SEC", "10")
         )
 
-        # vLLM 配置（逗号分隔多个实例，调度策略为 least-outstanding）
+        # vLLM 配置（逗号分隔多个实例）
         self.offline_api_bases: list[str] = [
             u.strip() for u in os.getenv(
                 "OFFLINE_API_BASES",
@@ -53,6 +53,9 @@ class Settings:
                 "http://127.0.0.1:15014/v1",
             ).split(",") if u.strip()
         ]
+        _sched = os.getenv("SCHEDULE_STRATEGY", "least_outstanding").lower()
+        self.schedule_strategy: str = _sched if _sched in ("least_outstanding", "round_robin") else "round_robin"
+
         self.offline_model_name: str = os.getenv(
             "OFFLINE_MODEL_NAME", "Qwen3-ASR-1.7B"
         )

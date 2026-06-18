@@ -178,6 +178,8 @@ class VLLMASRClient:
 
 _online_clients: list[VLLMASRClient] = []
 _offline_clients: list[VLLMASRClient] = []
+_online_rr: int = 0
+_offline_rr: int = 0
 
 
 def _init_clients() -> None:
@@ -195,18 +197,37 @@ def _init_clients() -> None:
     ]
 
 
-def get_online_client() -> VLLMASRClient:
-    _init_clients()
-    client = min(_online_clients, key=lambda c: c._outstanding)
+def _pick_least_outstanding(clients: list[VLLMASRClient]) -> VLLMASRClient:
+    client = min(clients, key=lambda c: c._outstanding)
     client._outstanding += 1
     return client
+
+
+def _pick_round_robin(clients: list[VLLMASRClient], counter: int) -> tuple[VLLMASRClient, int]:
+    client = clients[counter % len(clients)]
+    counter += 1
+    client._outstanding += 1
+    return client, counter
+
+
+def get_online_client() -> VLLMASRClient:
+    global _online_rr
+    _init_clients()
+    s = get_settings()
+    if s.schedule_strategy == "round_robin":
+        client, _online_rr = _pick_round_robin(_online_clients, _online_rr)
+        return client
+    return _pick_least_outstanding(_online_clients)
 
 
 def get_offline_client() -> VLLMASRClient:
+    global _offline_rr
     _init_clients()
-    client = min(_offline_clients, key=lambda c: c._outstanding)
-    client._outstanding += 1
-    return client
+    s = get_settings()
+    if s.schedule_strategy == "round_robin":
+        client, _offline_rr = _pick_round_robin(_offline_clients, _offline_rr)
+        return client
+    return _pick_least_outstanding(_offline_clients)
 
 
 async def close_asr_clients() -> None:
