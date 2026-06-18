@@ -34,7 +34,7 @@ ASCEND_RT_VISIBLE_DEVICES=2 \
   --compilation-config "{\"cudagraph_mode\":\"FULL_DECODE_ONLY\",\"cudagraph_capture_sizes\":$CUDAGRAPH_SIZES}" \
   --port 15002 &
 PIDS+=($!)
-sleep 210
+sleep 180
 
 # ── 离线 1.7B #2 (端口 15004) ──
 echo "=== 启动 Qwen3-ASR-1.7B #2 (端口 15004, mem 0.20) ==="
@@ -47,7 +47,7 @@ ASCEND_RT_VISIBLE_DEVICES=2 \
   --compilation-config "{\"cudagraph_mode\":\"FULL_DECODE_ONLY\",\"cudagraph_capture_sizes\":$CUDAGRAPH_SIZES}" \
   --port 15004 &
 PIDS+=($!)
-sleep 210
+sleep 180
 
 # ── 在线 0.6B #1~#5 (端口 15006, 15008, 15010, 15012, 15014) ──
 for i in 1 2 3 4 5; do
@@ -63,9 +63,9 @@ for i in 1 2 3 4 5; do
       --port $port &
     PIDS+=($!)
     if [ $i -eq 1 ]; then
-        sleep 180  # 第一个 0.6B 等模型加载
+        sleep 120  # 第一个 0.6B 等模型加载
     else
-        sleep 30   # 后续的共享已缓存的模型权重，更快
+        sleep 120   # 后续的共享已缓存的模型权重，更快
     fi
 done
 
