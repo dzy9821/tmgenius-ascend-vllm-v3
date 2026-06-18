@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 import logging
 import struct
@@ -115,6 +116,27 @@ def _filter_hallucination(text: str, hotwords: str = "") -> str:
     return text
 
 
+def _prepare_transcribe_request(audio: np.ndarray, hotwords: str) -> list:
+    """在后台线程中构建 WAV/base64/消息体，避免 event loop 阻塞。"""
+    wav_bytes = _build_wav_bytes(audio)
+    audio_b64 = base64.b64encode(wav_bytes).decode()
+
+    messages: list = []
+    hotword_ctx = _build_hotword_context(hotwords)
+    if hotword_ctx:
+        messages.append({"role": "system", "content": hotword_ctx})
+    messages.append({
+        "role": "user",
+        "content": [
+            {
+                "type": "audio_url",
+                "audio_url": {"url": f"data:audio/wav;base64,{audio_b64}"},
+            }
+        ],
+    })
+    return messages
+
+
 class VLLMASRClient:
     def __init__(self, api_base: str, model_name: str, api_key: str) -> None:
         self._api_base = api_base.rstrip("/")
@@ -130,22 +152,7 @@ class VLLMASRClient:
         )
 
     async def transcribe(self, audio: np.ndarray, hotwords: str = "") -> str:
-        wav_bytes = _build_wav_bytes(audio)
-        audio_b64 = base64.b64encode(wav_bytes).decode()
-
-        messages: list = []
-        hotword_ctx = _build_hotword_context(hotwords)
-        if hotword_ctx:
-            messages.append({"role": "system", "content": hotword_ctx})
-        messages.append({
-            "role": "user",
-            "content": [
-                {
-                    "type": "audio_url",
-                    "audio_url": {"url": f"data:audio/wav;base64,{audio_b64}"},
-                }
-            ],
-        })
+        messages = await asyncio.to_thread(_prepare_transcribe_request, audio, hotwords)
 
         response = await self._client.post(
             "/chat/completions",
