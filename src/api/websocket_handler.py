@@ -11,6 +11,7 @@ from typing import Any, Optional
 
 import numpy as np
 from fastapi import WebSocket
+from starlette.websockets import WebSocketDisconnect
 
 from src.config import get_settings
 from src.core.logging import trace_id_var
@@ -169,6 +170,8 @@ async def handle_websocket(websocket: WebSocket) -> None:
         await result_queue.put(FINALIZE_SENTINEL)
         await sender_task
 
+    except WebSocketDisconnect as exc:
+        logger.info("WebSocket client disconnected sid=%s code=%s reason=%s", sid, exc.code, exc.reason)
     except Exception as exc:
         logger.exception("WebSocket handler error sid=%s: %s", sid, exc)
     finally:
