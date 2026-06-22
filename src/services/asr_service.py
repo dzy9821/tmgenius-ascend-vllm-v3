@@ -167,27 +167,10 @@ class VLLMASRClient:
         await self._client.aclose()
 
 
-_online_clients: list[VLLMASRClient] = []
-_online_rr_counter: int = 0
-
-
-def _init_online_clients() -> list[VLLMASRClient]:
-    global _online_clients
-    if not _online_clients:
-        s = get_settings()
-        _online_clients = [
-            VLLMASRClient(s.online_api_base, s.online_model_name, s.vllm_api_key),
-            VLLMASRClient(s.online_api_base_2, s.online_model_name, s.vllm_api_key),
-        ]
-    return _online_clients
-
-
+@lru_cache(maxsize=1)
 def get_online_client() -> VLLMASRClient:
-    global _online_rr_counter
-    clients = _init_online_clients()
-    client = clients[_online_rr_counter % 2]
-    _online_rr_counter += 1
-    return client
+    s = get_settings()
+    return VLLMASRClient(s.online_api_base, s.online_model_name, s.vllm_api_key)
 
 
 @lru_cache(maxsize=1)
@@ -197,9 +180,9 @@ def get_offline_client() -> VLLMASRClient:
 
 
 async def close_asr_clients() -> None:
-    for clients in (_online_clients, [get_offline_client()]):
-        for client in clients:
-            try:
-                await client.close()
-            except Exception:
-                pass
+    for fn in (get_online_client, get_offline_client):
+        try:
+            client = fn()
+            await client.close()
+        except Exception:
+            pass
