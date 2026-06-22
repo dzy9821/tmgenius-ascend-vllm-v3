@@ -7,8 +7,8 @@ import websockets
 
 WS_URL = "ws://localhost:8856/ast/v1"
 # WS_URL = "ws://182.150.59.81:31848/ast/v1"
-#AUDIO_PATH = "data/120报警电话16k.wav"
-AUDIO_PATH = "data/zhangsanfeng.wav"
+AUDIO_PATH = "data/120报警电话16k.wav"
+#AUDIO_PATH = "data/zhangsanfeng.wav"
 FRAME_SIZE = 1280  # 1280 bytes = 40ms
 INTERVAL = 0.04
 OUTPUT_FILE = "recognition_results.json"

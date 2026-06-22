@@ -239,7 +239,7 @@ async def _process_audio_frame(
                          fs.online_cut_cursor, fs.online_total, fs.online_epoch)
             if fs.online_last_text:
                 sep = "，" if fs.online_last_text.rstrip()[-1:] not in "，。！？、；：,.!?;:" else ""
-                fs.online_accumulated_text = fs.online_last_text + sep
+                fs.online_accumulated_text = fs.online_accumulated_text + fs.online_last_text + sep
             fs.online_cut_cursor = fs.online_total
             fs.online_epoch += 1
             fs.online_last_trigger = fs.online_total
