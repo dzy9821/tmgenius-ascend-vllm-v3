@@ -43,8 +43,7 @@ class Settings:
         self.offline_api_bases: list[str] = [
             u.strip() for u in os.getenv(
                 "OFFLINE_API_BASES",
-                "http://127.0.0.1:15002/v1,http://127.0.0.1:15004/v1,"
-                "http://127.0.0.1:15006/v1",
+                "http://127.0.0.1:15002/v1",
             ).split(",") if u.strip()
         ]
         self.online_api_bases: list[str] = [
