@@ -11,7 +11,6 @@ from typing import Any, Optional
 
 import numpy as np
 from fastapi import WebSocket
-from starlette.websockets import WebSocketDisconnect
 
 from src.config import get_settings
 from src.core.logging import trace_id_var
@@ -53,7 +52,7 @@ class QueueMsg:
 
 @dataclass
 class FrameState:
-    online_buf: bytearray = field(default_factory=bytearray)
+    online_buffer: list = field(default_factory=list)
     online_total: int = 0
     online_last_trigger: int = 0
     online_epoch: int = 0
@@ -68,11 +67,6 @@ class FrameState:
     seg_start_abs: int = 0
     # 每连接独立的 Opus 解码器（仅当 encoding=="opus" 时惰性创建）
     opus_decoder: Optional[OpusDecoder] = None
-
-
-def _buf_view(fs: FrameState) -> np.ndarray:
-    """零拷贝获取 online_buf 的 int16 视图（只读）。"""
-    return np.frombuffer(fs.online_buf, dtype=np.int16)
 
 
 def _merge_hotwords(default: str, user: str) -> str:
@@ -156,16 +150,16 @@ async def handle_websocket(websocket: WebSocket) -> None:
                 )
 
         # End of stream: flush VAD and create tail offline tasks
-        tail = await vad.flush()
+        tail = vad.flush()
         if tail:
-            audio = _buf_view(fs).copy() if fs.online_total > 0 else tail["audio"]
+            audio = np.concatenate(fs.online_buffer) if fs.online_buffer else tail["audio"]
             _do_trigger_offline(
                 audio, tail["start_sample"], tail["end_sample"],
                 fs, hotwords, result_queue, reorder, all_tasks,
                 is_final=True,
             )
-        elif fs.online_total > 0:
-            audio = _buf_view(fs).copy()
+        elif fs.online_buffer:
+            audio = np.concatenate(fs.online_buffer)
             _do_trigger_offline(
                 audio, 0, len(audio), fs, hotwords, result_queue, reorder, all_tasks,
                 is_final=True,
@@ -175,8 +169,6 @@ async def handle_websocket(websocket: WebSocket) -> None:
         await result_queue.put(FINALIZE_SENTINEL)
         await sender_task
 
-    except WebSocketDisconnect as exc:
-        logger.info("WebSocket client disconnected sid=%s code=%s reason=%s", sid, exc.code, exc.reason)
     except Exception as exc:
         logger.exception("WebSocket handler error sid=%s: %s", sid, exc)
     finally:
@@ -226,14 +218,14 @@ async def _process_audio_frame(
         pcm = await rn.denoise(rn_proc, pcm)
 
     logger.debug("audio: %dms total=%dms", len(pcm) * 1000 // 16000, fs.online_total * 1000 // 16000)
-    fs.online_buf.extend(pcm.tobytes())
+    fs.online_buffer.append(pcm)
     fs.online_total += len(pcm)
     fs.abs_samples += len(pcm)
 
     segs = await vad.feed_audio(pcm)
 
     for seg in segs:
-        audio = _buf_view(fs).copy() if fs.online_total > 0 else seg["audio"]
+        audio = np.concatenate(fs.online_buffer) if fs.online_buffer else seg["audio"]
         _do_trigger_offline(
             audio, seg["start_sample"], seg["end_sample"],
             fs, hotwords, result_queue, reorder, all_tasks,
@@ -247,7 +239,7 @@ async def _process_audio_frame(
                          fs.online_cut_cursor, fs.online_total, fs.online_epoch)
             if fs.online_last_text:
                 sep = "，" if fs.online_last_text.rstrip()[-1:] not in "，。！？、；：,.!?;:" else ""
-                fs.online_accumulated_text += fs.online_last_text + sep
+                fs.online_accumulated_text = fs.online_last_text + sep
             fs.online_cut_cursor = fs.online_total
             fs.online_epoch += 1
             fs.online_last_trigger = fs.online_total
@@ -281,7 +273,7 @@ def _do_trigger_offline(
     )
     all_tasks.append(task)
 
-    fs.online_buf.clear()
+    fs.online_buffer.clear()
     fs.online_total = 0
     fs.online_last_trigger = 0
     fs.online_epoch += 1
@@ -305,7 +297,7 @@ def _maybe_trigger_online(
         return
 
     epoch_snap = fs.online_epoch
-    full_audio = _buf_view(fs)
+    full_audio = np.concatenate(fs.online_buffer)
     audio_snap = full_audio[fs.online_cut_cursor:].copy()
     seg_id_snap = fs.seg_id
     bg_snap = fs.seg_start_abs // 16

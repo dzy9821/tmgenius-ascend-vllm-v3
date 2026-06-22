@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-import asyncio
 import base64
 import logging
 import struct
 import re
+from functools import lru_cache
+from typing import Optional
 
 import httpx
 import numpy as np
@@ -114,27 +115,6 @@ def _filter_hallucination(text: str, hotwords: str = "") -> str:
     return text
 
 
-def _prepare_transcribe_request(audio: np.ndarray, hotwords: str) -> list:
-    """在后台线程中构建 WAV/base64/消息体，避免 event loop 阻塞。"""
-    wav_bytes = _build_wav_bytes(audio)
-    audio_b64 = base64.b64encode(wav_bytes).decode()
-
-    messages: list = []
-    hotword_ctx = _build_hotword_context(hotwords)
-    if hotword_ctx:
-        messages.append({"role": "system", "content": hotword_ctx})
-    messages.append({
-        "role": "user",
-        "content": [
-            {
-                "type": "audio_url",
-                "audio_url": {"url": f"data:audio/wav;base64,{audio_b64}"},
-            }
-        ],
-    })
-    return messages
-
-
 class VLLMASRClient:
     def __init__(self, api_base: str, model_name: str, api_key: str) -> None:
         self._api_base = api_base.rstrip("/")
@@ -148,22 +128,33 @@ class VLLMASRClient:
             timeout=httpx.Timeout(60.0),
             trust_env=False,
         )
-        self._outstanding: int = 0
 
     async def transcribe(self, audio: np.ndarray, hotwords: str = "") -> str:
-        try:
-            messages = await asyncio.to_thread(_prepare_transcribe_request, audio, hotwords)
+        wav_bytes = _build_wav_bytes(audio)
+        audio_b64 = base64.b64encode(wav_bytes).decode()
 
-            response = await self._client.post(
-                "/chat/completions",
-                json={"model": self._model_name, "messages": messages},
-            )
-            response.raise_for_status()
-            result = response.json()
-            raw_text = result.get("choices", [{}])[0].get("message", {}).get("content", "")
-            return _filter_hallucination(_parse_asr_response(raw_text), hotwords)
-        finally:
-            self._outstanding -= 1
+        messages: list = []
+        hotword_ctx = _build_hotword_context(hotwords)
+        if hotword_ctx:
+            messages.append({"role": "system", "content": hotword_ctx})
+        messages.append({
+            "role": "user",
+            "content": [
+                {
+                    "type": "audio_url",
+                    "audio_url": {"url": f"data:audio/wav;base64,{audio_b64}"},
+                }
+            ],
+        })
+
+        response = await self._client.post(
+            "/chat/completions",
+            json={"model": self._model_name, "messages": messages},
+        )
+        response.raise_for_status()
+        result = response.json()
+        raw_text = result.get("choices", [{}])[0].get("message", {}).get("content", "")
+        return _filter_hallucination(_parse_asr_response(raw_text), hotwords)
 
     async def check_health(self) -> bool:
         try:
@@ -177,62 +168,38 @@ class VLLMASRClient:
 
 
 _online_clients: list[VLLMASRClient] = []
-_offline_clients: list[VLLMASRClient] = []
-_online_rr: int = 0
-_offline_rr: int = 0
+_online_rr_counter: int = 0
 
 
-def _init_clients() -> None:
-    global _online_clients, _offline_clients
-    if _online_clients or _offline_clients:
-        return
-    s = get_settings()
-    _online_clients = [
-        VLLMASRClient(url, s.online_model_name, s.vllm_api_key)
-        for url in s.online_api_bases
-    ]
-    _offline_clients = [
-        VLLMASRClient(url, s.offline_model_name, s.vllm_api_key)
-        for url in s.offline_api_bases
-    ]
-
-
-def _pick_least_outstanding(clients: list[VLLMASRClient]) -> VLLMASRClient:
-    client = min(clients, key=lambda c: c._outstanding)
-    client._outstanding += 1
-    return client
-
-
-def _pick_round_robin(clients: list[VLLMASRClient], counter: int) -> tuple[VLLMASRClient, int]:
-    client = clients[counter % len(clients)]
-    counter += 1
-    client._outstanding += 1
-    return client, counter
+def _init_online_clients() -> list[VLLMASRClient]:
+    global _online_clients
+    if not _online_clients:
+        s = get_settings()
+        _online_clients = [
+            VLLMASRClient(s.online_api_base, s.online_model_name, s.vllm_api_key),
+            VLLMASRClient(s.online_api_base_2, s.online_model_name, s.vllm_api_key),
+        ]
+    return _online_clients
 
 
 def get_online_client() -> VLLMASRClient:
-    global _online_rr
-    _init_clients()
-    s = get_settings()
-    if s.schedule_strategy == "round_robin":
-        client, _online_rr = _pick_round_robin(_online_clients, _online_rr)
-        return client
-    return _pick_least_outstanding(_online_clients)
+    global _online_rr_counter
+    clients = _init_online_clients()
+    client = clients[_online_rr_counter % 2]
+    _online_rr_counter += 1
+    return client
 
 
+@lru_cache(maxsize=1)
 def get_offline_client() -> VLLMASRClient:
-    global _offline_rr
-    _init_clients()
     s = get_settings()
-    if s.schedule_strategy == "round_robin":
-        client, _offline_rr = _pick_round_robin(_offline_clients, _offline_rr)
-        return client
-    return _pick_least_outstanding(_offline_clients)
+    return VLLMASRClient(s.offline_api_base, s.offline_model_name, s.vllm_api_key)
 
 
 async def close_asr_clients() -> None:
-    for client in _online_clients + _offline_clients:
-        try:
-            await client.close()
-        except Exception:
-            pass
+    for clients in (_online_clients, [get_offline_client()]):
+        for client in clients:
+            try:
+                await client.close()
+            except Exception:
+                pass
