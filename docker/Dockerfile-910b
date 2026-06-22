@@ -1,5 +1,5 @@
-# 耦合 vLLM-Ascend v0.20.2rc1 目录布局（connections.py 补丁路径）
-ARG BASE_IMAGE=quay.io/ascend/vllm-ascend:v0.20.2rc1
+# 耦合 vLLM-Ascend v0.19.1rc1 目录布局（connections.py 补丁路径）
+ARG BASE_IMAGE=quay.io/ascend/vllm-ascend:v0.19.1rc1
 FROM ${BASE_IMAGE}
 
 ENV PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple

@@ -14,7 +14,7 @@ client = OpenAI(
 )
 
 # 构造热词上下文（逗号或竖线分隔）
-hotwords = "张三疯,向钱看"
+hotwords = "警单,警情"
 
 
 def build_hotword_context(hotwords_str: str) -> str:
