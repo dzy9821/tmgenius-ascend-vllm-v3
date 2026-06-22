@@ -101,7 +101,7 @@ class TenVADSession:
 
         return segments
 
-    def flush(self) -> Optional[dict]:
+    async def flush(self) -> Optional[dict]:
         if not self._segment_frames:
             return None
         speech_duration = self._speech_frame_count * self.frame_duration
@@ -113,7 +113,7 @@ class TenVADSession:
             self._silence_frame_count - self._merged_frames,
             self._merged_frames,
         )
-        return self._finalize_segment(speech_duration)
+        return await self._finalize_segment(speech_duration)
 
     def close(self) -> None:
         if self._vad is not None:
@@ -226,7 +226,7 @@ class TenVADSession:
                         "silence", speech_dur, pause_dur,
                         self._silence_frame_count, self._merged_frames,
                     )
-                    return self._finalize_segment(speech_dur)
+                    return await self._finalize_segment(speech_dur)
 
         # 强制上限：用实际段长（含 gap buffer）做检查
         if self._in_speech:
@@ -244,7 +244,7 @@ class TenVADSession:
                     self._gap_buffer.clear()
                 speech_dur = self._speech_frame_count * self.frame_duration
                 logger.debug("vad cut: max_speech speech=%.0fms", speech_dur * 1000)
-                return self._finalize_segment(speech_dur)
+                return await self._finalize_segment(speech_dur)
 
         return None
 
@@ -256,7 +256,7 @@ class TenVADSession:
         ) * self.hop_size
         return min(target_end, buffered_end)
 
-    def _finalize_segment(self, speech_duration: float) -> Optional[dict]:
+    async def _finalize_segment(self, speech_duration: float) -> Optional[dict]:
         if speech_duration < MIN_SPEECH_DURATION:
             logger.debug(
                 "vad drop: speech=%.0fms < min=%.0fms discarded",
@@ -264,13 +264,13 @@ class TenVADSession:
             )
             self._reset()
             return None
-        return self._extract_and_reset()
+        return await self._extract_and_reset()
 
-    def _extract_and_reset(self) -> dict:
+    async def _extract_and_reset(self) -> dict:
         start = self._speech_start_sample
         end = self._compute_segment_end()
         all_frames = self._pre_snapshot + self._segment_frames
-        audio = np.concatenate(all_frames)
+        audio = await asyncio.to_thread(np.concatenate, all_frames)
         num_samples = end - start
         if len(audio) > num_samples:
             audio = audio[:num_samples]

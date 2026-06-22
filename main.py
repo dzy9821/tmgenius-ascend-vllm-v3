@@ -21,7 +21,7 @@ from src.metrics import (
     segments_total as asr_segments_total,
     errors_total as asr_errors_total,
 )
-from src.services.asr_service import close_asr_clients, get_offline_client, get_online_client
+from src.services.asr_service import close_asr_clients, get_offline_client, get_online_client, _online_clients, _offline_clients
 from src.services.itn_service import ITNService
 from src.services.session_manager import SessionManager
 
@@ -60,7 +60,7 @@ async def lifespan(app: FastAPI):
 
     app.state.session_manager = SessionManager(settings.max_connections)
 
-    # 触发 lazy 初始化
+    # 触发 lazy 初始化（所有 online/offline 实例）
     get_online_client()
     get_offline_client()
 
@@ -81,22 +81,29 @@ async def lifespan(app: FastAPI):
     app.state.rnnoise_service = rnnoise_service
     set_rnnoise_service(rnnoise_service)
 
-    # 后台 vLLM 健康检查
+    # 后台 vLLM 健康检查（检查所有实例）
     async def _health_monitor():
         consecutive_fails = 0
+        all_clients = _online_clients + _offline_clients
         while True:
             await asyncio.sleep(settings.vllm_health_check_interval)
-            online_ok = await get_online_client().check_health()
-            offline_ok = await get_offline_client().check_health()
-            if not (online_ok and offline_ok):
+            results = []
+            for client in all_clients:
+                results.append(await client.check_health())
+            all_ok = all(results)
+            any_ok = any(results)
+            if not all_ok:
                 consecutive_fails += 1
+                failed = sum(1 for r in results if not r)
                 if consecutive_fails >= 3:
                     logger.error(
-                        "vLLM health check failed 3 times consecutively"
+                        "vLLM health check failed 3 times consecutively: "
+                        "%d/%d instances down", failed, len(results)
                     )
             else:
                 consecutive_fails = 0
-            app.state.vllm_healthy = online_ok and offline_ok
+            # 有任意实例存活即认为可用，全挂才置为 unhealthy
+            app.state.vllm_healthy = any_ok
 
     app.state.vllm_healthy = True
     asyncio.create_task(_health_monitor())

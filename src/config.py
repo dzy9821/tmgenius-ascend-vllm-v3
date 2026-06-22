@@ -25,7 +25,7 @@ class Settings:
         self.asr_pad_frames: int = int(os.getenv("ASR_PAD_FRAMES", "5"))
 
         # Online ASR 触发阈值
-        self.online_trigger_ms: int = int(os.getenv("ONLINE_TRIGGER_MS", "400"))
+        self.online_trigger_ms: int = int(os.getenv("ONLINE_TRIGGER_MS", "200"))
         self.online_vad_pause_ms: int = int(os.getenv("ONLINE_VAD_PAUSE_MS", "500"))
 
         # ITN 多进程池
@@ -38,16 +38,25 @@ class Settings:
             os.getenv("MP_QUEUE_LOG_INTERVAL_SEC", "10")
         )
 
-        # vLLM 配置
-        self.offline_api_base: str = os.getenv(
-            "OFFLINE_API_BASE", "http://127.0.0.1:15002/v1"
-        )
-        self.online_api_base: str = os.getenv(
-            "ONLINE_API_BASE", "http://127.0.0.1:15004/v1"
-        )
-        self.online_api_base_2: str = os.getenv(
-            "ONLINE_API_BASE_2", "http://127.0.0.1:15006/v1"
-        )
+        # vLLM 配置（逗号分隔多个实例）
+        # 默认: 3x 1.7B (离线, 15002~15006) + 6x 0.6B (在线, 15008~15018)
+        self.offline_api_bases: list[str] = [
+            u.strip() for u in os.getenv(
+                "OFFLINE_API_BASES",
+                "http://127.0.0.1:15002/v1",
+            ).split(",") if u.strip()
+        ]
+        self.online_api_bases: list[str] = [
+            u.strip() for u in os.getenv(
+                "ONLINE_API_BASES",
+                "http://127.0.0.1:15008/v1,http://127.0.0.1:15010/v1,"
+                "http://127.0.0.1:15012/v1,http://127.0.0.1:15014/v1,"
+                "http://127.0.0.1:15016/v1,http://127.0.0.1:15018/v1",
+            ).split(",") if u.strip()
+        ]
+        _sched = os.getenv("SCHEDULE_STRATEGY", "least_outstanding").lower()
+        self.schedule_strategy: str = _sched if _sched in ("least_outstanding", "round_robin") else "round_robin"
+
         self.offline_model_name: str = os.getenv(
             "OFFLINE_MODEL_NAME", "Qwen3-ASR-1.7B"
         )
