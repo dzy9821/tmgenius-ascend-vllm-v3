@@ -243,7 +243,6 @@ async def _process_audio_frame(
             fs.online_cut_cursor = fs.online_total
             fs.online_epoch += 1
             fs.online_last_trigger = fs.online_total
-            fs.online_busy = False
 
     _maybe_trigger_online(fs, hotwords, result_queue, all_tasks)
 
@@ -328,21 +327,22 @@ async def _do_online_asr(
     try:
         text = await get_online_client().transcribe(audio, hotwords="")
         if fs.online_epoch != epoch_snap:
-            # 过期结果：保存文本供后续子分段拼接
+            # 过期结果：VAD cut（同 segment）的文本需累加；离线触发（跨 segment）则丢弃
             if text:
                 text = strip_trailing_punct(text)
-                if text:
+                if text and fs.seg_id == seg_id_snap:
                     fs.online_last_text = text
+                    sep = "，" if text[-1] not in "，。！？、；：,.!?;:" else ""
+                    fs.online_accumulated_text = fs.online_accumulated_text + text + sep
+            fs.online_busy = False
             logger.debug("online stale: seg=%d epoch=%d current=%d", seg_id_snap, epoch_snap, fs.online_epoch)
             return
         text = strip_trailing_punct(text)
         if text:
-            fs.online_last_text = text
-            # 拼接前一个在线子分段的累积文本
-            if fs.online_accumulated_text:
-                text = fs.online_accumulated_text + text
-            logger.debug("online result: seg=%d epoch=%d text=%s", seg_id_snap, epoch_snap, text)
-            await result_queue.put(QueueMsg(seg_id_snap, "Progressive", text, bg, ed))
+            full_text = (fs.online_accumulated_text + text) if fs.online_accumulated_text else text
+            fs.online_last_text = full_text
+            logger.debug("online result: seg=%d epoch=%d text=%s", seg_id_snap, epoch_snap, full_text)
+            await result_queue.put(QueueMsg(seg_id_snap, "Progressive", full_text, bg, ed))
     finally:
         if fs.online_epoch == epoch_snap:
             fs.online_busy = False

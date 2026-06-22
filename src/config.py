@@ -45,6 +45,13 @@ class Settings:
         self.online_api_base: str = os.getenv(
             "ONLINE_API_BASE", "http://127.0.0.1:15004/v1"
         )
+        # 多个 online 实例的 API base，逗号分隔；未设置时回退到 ONLINE_API_BASE
+        _online_bases = os.getenv("ONLINE_API_BASES", "")
+        self.online_api_bases: list[str] = (
+            [u.strip() for u in _online_bases.split(",") if u.strip()]
+            if _online_bases
+            else [self.online_api_base]
+        )
         self.offline_model_name: str = os.getenv(
             "OFFLINE_MODEL_NAME", "Qwen3-ASR-1.7B"
         )
@@ -75,7 +82,7 @@ class Settings:
         self.rnnoise_workers: int = int(os.getenv("RNNOISE_WORKERS", "4"))
 
         # 热词配置
-        self.hotwords: str = os.getenv("HOTWORDS", "张三疯,向钱看")
+        self.hotwords: str = os.getenv("HOTWORDS", "")
 
 
 @lru_cache(maxsize=1)

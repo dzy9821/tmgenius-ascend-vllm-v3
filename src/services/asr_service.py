@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import base64
+import itertools
 import logging
 import struct
 import re
@@ -167,10 +169,37 @@ class VLLMASRClient:
         await self._client.aclose()
 
 
+class RoundRobinASRClient:
+    """轮询分发在线请求到多个 vLLM 实例。"""
+
+    def __init__(self, api_bases: list[str], model_name: str, api_key: str) -> None:
+        self._clients = [
+            VLLMASRClient(base, model_name, api_key) for base in api_bases
+        ]
+        self._idx_cycle = itertools.cycle(range(len(self._clients)))
+        self._lock = asyncio.Lock()
+
+    async def transcribe(self, audio: "np.ndarray", hotwords: str = "") -> str:
+        async with self._lock:
+            idx = next(self._idx_cycle)
+        return await self._clients[idx].transcribe(audio, hotwords)
+
+    async def check_health(self) -> bool:
+        results = await asyncio.gather(
+            *[c.check_health() for c in self._clients], return_exceptions=True
+        )
+        return all(r is True for r in results)
+
+    async def close(self) -> None:
+        await asyncio.gather(
+            *[c.close() for c in self._clients], return_exceptions=True
+        )
+
+
 @lru_cache(maxsize=1)
-def get_online_client() -> VLLMASRClient:
+def get_online_client() -> RoundRobinASRClient:
     s = get_settings()
-    return VLLMASRClient(s.online_api_base, s.online_model_name, s.vllm_api_key)
+    return RoundRobinASRClient(s.online_api_bases, s.online_model_name, s.vllm_api_key)
 
 
 @lru_cache(maxsize=1)
