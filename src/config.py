@@ -82,7 +82,7 @@ class Settings:
         self.rnnoise_workers: int = int(os.getenv("RNNOISE_WORKERS", "4"))
 
         # 热词配置
-        self.hotwords: str = os.getenv("HOTWORDS", "张三疯,向钱看")
+        self.hotwords: str = os.getenv("HOTWORDS", "")
 
 
 @lru_cache(maxsize=1)
