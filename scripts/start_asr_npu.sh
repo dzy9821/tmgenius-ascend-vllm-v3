@@ -1,5 +1,7 @@
 #!/bin/bash
-set -e
+# 注意：不使用 set -e
+# 此脚本通常作为后台进程运行（从 entrypoint.sh 调用），
+# set -e 会导致 curl 健康检查返回非零时脚本静默退出
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
