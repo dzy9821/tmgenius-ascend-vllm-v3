@@ -52,6 +52,13 @@ class Settings:
             if _online_bases
             else [self.online_api_base]
         )
+        # 多个 offline 实例的 API base，逗号分隔；未设置时回退到 OFFLINE_API_BASE
+        _offline_bases = os.getenv("OFFLINE_API_BASES", "")
+        self.offline_api_bases: list[str] = (
+            [u.strip() for u in _offline_bases.split(",") if u.strip()]
+            if _offline_bases
+            else [self.offline_api_base]
+        )
         self.offline_model_name: str = os.getenv(
             "OFFLINE_MODEL_NAME", "Qwen3-ASR-1.7B"
         )

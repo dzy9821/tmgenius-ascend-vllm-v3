@@ -1,5 +1,7 @@
 #!/bin/bash
-set -e
+# 注意：不使用 set -e
+# 此脚本通常作为后台进程运行（从 entrypoint.sh 调用），
+# set -e 会导致 curl 健康检查返回非零时脚本静默退出
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -16,22 +18,33 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-echo "=== 启动 Qwen3-ASR-1.7B (端口 15002) ==="
+echo "=== 启动 Qwen3-ASR-1.7B #1 (端口 15002, mem 0.21) ==="
 ASCEND_RT_VISIBLE_DEVICES=2 \
   vllm serve "/weights/Qwen3-ASR-1.7B" \
   --served-model-name Qwen3-ASR-1.7B \
-  --gpu-memory-utilization 0.4 \
+  --gpu-memory-utilization 0.21 \
   --max-model-len 4096 \
   --host 0.0.0.0 \
   --compilation-config '{"cudagraph_mode":"FULL_DECODE_ONLY","cudagraph_capture_sizes":[1,2,4,8,16,32,64]}' \
   --port 15002 &
 PIDS+=($!)
 
+echo "=== 启动 Qwen3-ASR-1.7B #2 (端口 15003, mem 0.21) ==="
+ASCEND_RT_VISIBLE_DEVICES=2 \
+  vllm serve "/weights/Qwen3-ASR-1.7B" \
+  --served-model-name Qwen3-ASR-1.7B \
+  --gpu-memory-utilization 0.21 \
+  --max-model-len 4096 \
+  --host 0.0.0.0 \
+  --compilation-config '{"cudagraph_mode":"FULL_DECODE_ONLY","cudagraph_capture_sizes":[1,2,4,8,16,32,64]}' \
+  --port 15004 &
+PIDS+=($!)
+
 sleep 150
 
-echo "=== 启动 6 个 Qwen3-ASR-0.6B (端口 15004-15014, 步进 2) ==="
+echo "=== 启动 6 个 Qwen3-ASR-0.6B (端口 15006-15016, 步进 2) ==="
 for i in $(seq 0 5); do
-    PORT=$((15004 + i * 2))
+    PORT=$((15006 + i * 2))
     echo "  Qwen3-ASR-0.6B #$((i+1)) → 端口 $PORT"
     ASCEND_RT_VISIBLE_DEVICES=2 \
       vllm serve "/weights/Qwen3-ASR-0.6B" \
@@ -56,11 +69,13 @@ for t in $(seq 1 120); do
     OK_15010=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:15010/v1/models 2>/dev/null || echo "000")
     OK_15012=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:15012/v1/models 2>/dev/null || echo "000")
     OK_15014=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:15014/v1/models 2>/dev/null || echo "000")
-    if [ "$OK_15002" = "200" ] && [ "$OK_15004" = "200" ] && [ "$OK_15006" = "200" ] && [ "$OK_15008" = "200" ] && [ "$OK_15010" = "200" ] && [ "$OK_15012" = "200" ] && [ "$OK_15014" = "200" ]; then
+    OK_15016=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:15016/v1/models 2>/dev/null || echo "000")
+    if [ "$OK_15002" = "200" ] && [ "$OK_15004" = "200" ] && [ "$OK_15006" = "200" ] && [ "$OK_15008" = "200" ] && [ "$OK_15010" = "200" ] && [ "$OK_15012" = "200" ] && [ "$OK_15014" = "200" ] && [ "$OK_15016" = "200" ]; then
         echo "=== 全部 ${#PIDS[@]} 个服务已就绪 ==="
-        echo "1.7B → http://localhost:15002"
+        echo "1.7B #1 → http://localhost:15002"
+        echo "1.7B #2 → http://localhost:15004"
         for i in $(seq 0 5); do
-            PORT=$((15004 + i * 2))
+            PORT=$((15006 + i * 2))
             echo "0.6B #$((i+1)) → http://localhost:$PORT"
         done
         wait
