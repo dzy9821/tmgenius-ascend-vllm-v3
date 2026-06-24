@@ -23,19 +23,31 @@ trap cleanup SIGTERM SIGINT SIGQUIT
 # ==========================================================
 #  1. 启动 Qwen3-ASR-1.7B (端口 15002)
 # ==========================================================
-echo "=== [entrypoint] 启动 Qwen3-ASR-1.7B (端口 15002) ==="
+echo "=== [entrypoint] 启动 Qwen3-ASR-1.7B #1 (端口 15002, mem 0.21) ==="
 ASCEND_RT_VISIBLE_DEVICES=2 \
   vllm serve "/weights/Qwen3-ASR-1.7B" \
   --served-model-name Qwen3-ASR-1.7B \
-  --gpu-memory-utilization 0.4 \
+  --gpu-memory-utilization 0.21 \
   --max-model-len 4096 \
   --host 0.0.0.0 \
   --compilation-config '{"cudagraph_mode":"FULL_DECODE_ONLY","cudagraph_capture_sizes":[1,2,4,8,16,32,64]}' \
   --port 15002 &
 VLLM_PIDS+=($!)
-echo "[entrypoint] 1.7B PID=${VLLM_PIDS[-1]}"
+echo "[entrypoint] 1.7B #1 PID=${VLLM_PIDS[-1]}"
 
-# 等 1.7B 先加载一段时间再启动 0.6B 实例
+echo "=== [entrypoint] 启动 Qwen3-ASR-1.7B #2 (端口 15003, mem 0.21) ==="
+ASCEND_RT_VISIBLE_DEVICES=2 \
+  vllm serve "/weights/Qwen3-ASR-1.7B" \
+  --served-model-name Qwen3-ASR-1.7B \
+  --gpu-memory-utilization 0.21 \
+  --max-model-len 4096 \
+  --host 0.0.0.0 \
+  --compilation-config '{"cudagraph_mode":"FULL_DECODE_ONLY","cudagraph_capture_sizes":[1,2,4,8,16,32,64]}' \
+  --port 15004 &
+VLLM_PIDS+=($!)
+echo "[entrypoint] 1.7B #2 PID=${VLLM_PIDS[-1]}"
+
+# 等 1.7B 实例加载完成再启动 0.6B
 sleep 150
 
 # ==========================================================
@@ -43,7 +55,7 @@ sleep 150
 # ==========================================================
 echo "=== [entrypoint] 启动 6 个 Qwen3-ASR-0.6B ==="
 for i in $(seq 0 5); do
-    PORT=$((15004 + i * 2))
+    PORT=$((15006 + i * 2))
     echo "[entrypoint] Qwen3-ASR-0.6B #$((i+1)) → 端口 $PORT"
     ASCEND_RT_VISIBLE_DEVICES=2 \
       vllm serve "/weights/Qwen3-ASR-0.6B" \
@@ -63,7 +75,7 @@ done
 # ==========================================================
 #  3. 等待所有 vLLM 端口就绪
 # ==========================================================
-PORTS="15002 15004 15006 15008 15010 15012 15014"
+PORTS="15002 15004 15006 15008 15010 15012 15014 15016"
 echo "[entrypoint] 等待全部 ${#VLLM_PIDS[@]} 个 vLLM 服务就绪..."
 
 for attempt in $(seq 1 120); do
@@ -78,9 +90,10 @@ for attempt in $(seq 1 120); do
 
     if $ALL_OK; then
         echo "[entrypoint] === 全部 ${#VLLM_PIDS[@]} 个 vLLM 服务已就绪 ==="
-        echo "[entrypoint] 1.7B → http://localhost:15002"
+        echo "[entrypoint] 1.7B #1 → http://localhost:15002"
+        echo "[entrypoint] 1.7B #2 → http://localhost:15004"
         for i in $(seq 0 5); do
-            PORT=$((15004 + i * 2))
+            PORT=$((15006 + i * 2))
             echo "[entrypoint] 0.6B #$((i+1)) → http://localhost:$PORT"
         done
         break
@@ -99,5 +112,14 @@ fi
 # ==========================================================
 #  4. 启动主程序（exec 接管进程）
 # ==========================================================
-echo "=== [entrypoint] 启动主程序 main.py ==="
-exec python /app/main.py
+export OFFLINE_API_BASES="http://127.0.0.1:15002/v1,http://127.0.0.1:15004/v1"
+export ONLINE_API_BASES="http://127.0.0.1:15006/v1,http://127.0.0.1:15008/v1,http://127.0.0.1:15010/v1,http://127.0.0.1:15012/v1,http://127.0.0.1:15014/v1,http://127.0.0.1:15016/v1"
+
+echo "=== [entrypoint] 启动主程序 (uvicorn, 4 workers) ==="
+exec python -m uvicorn main:app \
+  --host "${WS_HOST:-0.0.0.0}" \
+  --port "${WS_PORT:-8856}" \
+  --workers 4 \
+  --ws-ping-interval "${WS_PING_INTERVAL:-10}" \
+  --ws-ping-timeout "${WS_PING_TIMEOUT:-300}" \
+  --log-level "${LOG_LEVEL:-info}"

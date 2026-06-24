@@ -203,9 +203,9 @@ def get_online_client() -> RoundRobinASRClient:
 
 
 @lru_cache(maxsize=1)
-def get_offline_client() -> VLLMASRClient:
+def get_offline_client() -> RoundRobinASRClient:
     s = get_settings()
-    return VLLMASRClient(s.offline_api_base, s.offline_model_name, s.vllm_api_key)
+    return RoundRobinASRClient(s.offline_api_bases, s.offline_model_name, s.vllm_api_key)
 
 
 async def close_asr_clients() -> None:
