@@ -121,5 +121,4 @@ exec python -m uvicorn main:app \
   --port "${WS_PORT:-8856}" \
   --workers 4 \
   --ws-ping-interval "${WS_PING_INTERVAL:-10}" \
-  --ws-ping-timeout "${WS_PING_TIMEOUT:-300}" \
-  --log-level "${LOG_LEVEL:-info}"
+  --ws-ping-timeout "${WS_PING_TIMEOUT:-300}"
