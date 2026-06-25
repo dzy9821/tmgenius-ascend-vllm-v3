@@ -16,6 +16,7 @@ from src.config import get_settings
 from src.core.logging import trace_id_var
 from src.core.opus_decoder import OpusDecoder
 from src.services.asr_service import get_online_client, get_offline_client, strip_trailing_punct
+from src.services.license_plate import normalize_license_plates
 from src.services.vad_service import TenVADSession
 
 logger = logging.getLogger(__name__)
@@ -60,6 +61,8 @@ class FrameState:
     seg_id: int = 0
     # Online VAD 子分段：cursor 之后的音频才送入在线 ASR
     online_cut_cursor: int = 0
+    # 与 online_buffer 一一对应的 VAD flag，1=语音 0=静音
+    online_speech_flags: list = field(default_factory=list)
     online_last_text: str = ""
     online_accumulated_text: str = ""
     # 绝对样本时钟（自连接开始累计），用于计算 bg/ed
@@ -222,7 +225,8 @@ async def _process_audio_frame(
     fs.online_total += len(pcm)
     fs.abs_samples += len(pcm)
 
-    segs = await vad.feed_audio(pcm)
+    segs, frame_flags = await vad.feed_audio(pcm)
+    fs.online_speech_flags.extend(frame_flags)
 
     for seg in segs:
         audio = np.concatenate(fs.online_buffer) if fs.online_buffer else seg["audio"]
@@ -244,7 +248,7 @@ async def _process_audio_frame(
             fs.online_epoch += 1
             fs.online_last_trigger = fs.online_total
 
-    _maybe_trigger_online(fs, hotwords, result_queue, all_tasks)
+    _maybe_trigger_online(fs, hotwords, result_queue, all_tasks, vad)
 
 
 def _do_trigger_offline(
@@ -273,6 +277,7 @@ def _do_trigger_offline(
     all_tasks.append(task)
 
     fs.online_buffer.clear()
+    fs.online_speech_flags.clear()
     fs.online_total = 0
     fs.online_last_trigger = 0
     fs.online_epoch += 1
@@ -289,6 +294,7 @@ def _maybe_trigger_online(
     hotwords: str,
     result_queue: asyncio.Queue,
     all_tasks: list,
+    vad: Any,
 ) -> None:
     if fs.online_busy:
         return
@@ -296,8 +302,15 @@ def _maybe_trigger_online(
         return
 
     epoch_snap = fs.online_epoch
-    full_audio = np.concatenate(fs.online_buffer)
-    audio_snap = full_audio[fs.online_cut_cursor:].copy()
+    cursor_idx = fs.online_cut_cursor // vad.hop_size
+    speech_frames = [
+        fs.online_buffer[i]
+        for i in range(cursor_idx, len(fs.online_buffer))
+        if i < len(fs.online_speech_flags) and fs.online_speech_flags[i] == 1
+    ]
+    if not speech_frames:
+        return
+    audio_snap = np.concatenate(speech_frames)
     seg_id_snap = fs.seg_id
     bg_snap = fs.seg_start_abs // 16
     ed_snap = fs.abs_samples // 16
@@ -364,6 +377,7 @@ async def _do_offline_asr(
                 text = await _itn_service.process(text)
             except Exception as exc:
                 logger.warning("ITN failed seg_id=%d: %s", seg_id, exc)
+            text = normalize_license_plates(text)
         logger.debug("offline result: seg=%d text=%s", seg_id, text or "")
         await _advance_reorder_pointer(seg_id, text or None, bg, ed, result_queue, reorder)
     except Exception as exc:

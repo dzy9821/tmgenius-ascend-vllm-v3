@@ -83,10 +83,11 @@ class TenVADSession:
     def speech_start_sample(self) -> int:
         return self._speech_start_sample
 
-    async def feed_audio(self, pcm_int16: np.ndarray) -> list[dict]:
+    async def feed_audio(self, pcm_int16: np.ndarray) -> tuple[list[dict], list[int]]:
         self._chunks.append(pcm_int16)
         self._chunk_total += len(pcm_int16)
         segments: list[dict] = []
+        flags: list[int] = []
 
         while self._chunk_total >= self.hop_size:
             buffer = np.concatenate(self._chunks)
@@ -95,11 +96,12 @@ class TenVADSession:
             self._chunks = [remainder] if len(remainder) > 0 else []
             self._chunk_total = len(remainder)
 
-            result = await self._process_frame(frame)
+            result, flag = await self._process_frame(frame)
+            flags.append(flag)
             if result is not None:
                 segments.append(result)
 
-        return segments
+        return segments, flags
 
     def flush(self) -> Optional[dict]:
         if not self._segment_frames:
@@ -124,7 +126,7 @@ class TenVADSession:
         else:
             logger.warning("TenVAD instance already released: sid=%s", self._sid)
 
-    async def _process_frame(self, frame: np.ndarray) -> Optional[dict]:
+    async def _process_frame(self, frame: np.ndarray) -> tuple[Optional[dict], int]:
         prob, flag_i = await asyncio.to_thread(self._vad.process, frame)
         self._total_samples += self.hop_size
         flag = int(flag_i)
@@ -226,7 +228,7 @@ class TenVADSession:
                         "silence", speech_dur, pause_dur,
                         self._silence_frame_count, self._merged_frames,
                     )
-                    return self._finalize_segment(speech_dur)
+                    return self._finalize_segment(speech_dur), flag
 
         # 强制上限：用实际段长（含 gap buffer）做检查
         if self._in_speech:
@@ -244,9 +246,9 @@ class TenVADSession:
                     self._gap_buffer.clear()
                 speech_dur = self._speech_frame_count * self.frame_duration
                 logger.debug("vad cut: max_speech speech=%.0fms", speech_dur * 1000)
-                return self._finalize_segment(speech_dur)
+                return self._finalize_segment(speech_dur), flag
 
-        return None
+        return None, flag
 
     def _compute_segment_end(self) -> int:
         pad_samples = self._pad_frames * self.hop_size
