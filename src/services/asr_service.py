@@ -64,22 +64,70 @@ def _build_wav_bytes(pcm_int16: np.ndarray) -> bytes:
 _ASR_TAG_RE = re.compile(r'language\s+\w+\s*<asr_text>', re.IGNORECASE)
 
 
+def _detect_and_fix_repetitions(text: str, threshold: int = 20) -> str:
+    def _fix_char_repeats(s: str, thresh: int) -> str:
+        res = []
+        i = 0
+        n = len(s)
+        while i < n:
+            count = 1
+            while i + count < n and s[i + count] == s[i]:
+                count += 1
+            if count > thresh:
+                res.append(s[i])
+            else:
+                res.append(s[i : i + count])
+            i += count
+        return "".join(res)
+
+    def _fix_pattern_repeats(s: str, thresh: int, max_len: int = 20) -> str:
+        n = len(s)
+        min_repeat_chars = thresh * 2
+        if n < min_repeat_chars:
+            return s
+        i = 0
+        result = []
+        found = False
+        while i <= n - min_repeat_chars:
+            for k in range(1, max_len + 1):
+                if i + k * thresh > n:
+                    break
+                pattern = s[i : i + k]
+                valid = True
+                for rep in range(1, thresh):
+                    start_idx = i + rep * k
+                    if s[start_idx : start_idx + k] != pattern:
+                        valid = False
+                        break
+                if valid:
+                    total_rep = thresh
+                    end_index = i + thresh * k
+                    while end_index + k <= n and s[end_index : end_index + k] == pattern:
+                        total_rep += 1
+                        end_index += k
+                    result.append(pattern)
+                    result.append(_fix_pattern_repeats(s[end_index:], thresh, max_len))
+                    found = True
+                    break
+            if found:
+                break
+            result.append(s[i])
+            i += 1
+        if not found:
+            result.append(s[i:])
+        return "".join(result)
+
+    text = _fix_char_repeats(text, threshold)
+    text = _fix_pattern_repeats(text, threshold)
+    return text
+
+
 def _parse_asr_response(content: str) -> str:
-    """Strip Qwen3-ASR format tags from transcription output.
-
-    Handles these Qwen3-ASR output formats:
-      - "language Chinese<asr_text>..." → "..."
-      - "language None<asr_text>" → ""
-      - Plain text without tag → text as-is
-      - Multiple tags (model hallucination) → all stripped
-
-    Uses re.sub to remove ALL occurrences, preventing leakage when
-    the model hallucinates extra "language X<asr_text>" prefixes mid-text.
-    """
+    """Strip Qwen3-ASR format tags and fix repetition hallucinations."""
     if not content:
         return ""
-
     text = _ASR_TAG_RE.sub('', content).strip()
+    text = _detect_and_fix_repetitions(text)
     return text
 
 
