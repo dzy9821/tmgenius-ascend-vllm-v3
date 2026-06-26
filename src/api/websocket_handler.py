@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 FINALIZE_SENTINEL = object()
 ONLINE_TRIGGER_SAMPLES: int = get_settings().online_trigger_ms * 16  # 400ms * 16 = 6400
 ONLINE_VAD_PAUSE_SEC: float = get_settings().online_vad_pause_ms / 1000.0  # 500ms = 0.5s
+ONLINE_MAX_SPEECH_SAMPLES: int = 10 * 16000  # 10s 有效语音 → 强制在线切分
 
 _itn_service: Any = None
 _rnnoise_service_ref: Any = None
@@ -63,6 +64,8 @@ class FrameState:
     online_cut_cursor: int = 0
     # 与 online_buffer 一一对应的 VAD flag，1=语音 0=静音
     online_speech_flags: list = field(default_factory=list)
+    # 当前在线子分段内 flag=1 的累计采样数，用于 10s 时长切
+    online_speech_samples: int = 0
     online_last_text: str = ""
     online_accumulated_text: str = ""
     # 绝对样本时钟（自连接开始累计），用于计算 bg/ed
@@ -227,6 +230,9 @@ async def _process_audio_frame(
 
     segs, frame_flags = await vad.feed_audio(pcm)
     fs.online_speech_flags.extend(frame_flags)
+    for flag in frame_flags:
+        if flag == 1:
+            fs.online_speech_samples += vad.hop_size
 
     for seg in segs:
         audio = np.concatenate(fs.online_buffer) if fs.online_buffer else seg["audio"]
@@ -236,10 +242,11 @@ async def _process_audio_frame(
         )
 
     # Online VAD 子分段：静音 ≥ 0.5s 时推进 cursor，后续在线推理只用新音频
+    triggered_cut = False
     if vad.in_speech and vad.silence_duration >= ONLINE_VAD_PAUSE_SEC:
         silence_samples = int(vad.silence_duration * 16000)
         if fs.online_total - fs.online_cut_cursor > silence_samples:
-            logger.debug("online vad cut: cursor=%d -> %d epoch=%d",
+            logger.debug("online vad cut (silence): cursor=%d -> %d epoch=%d",
                          fs.online_cut_cursor, fs.online_total, fs.online_epoch)
             if fs.online_last_text:
                 sep = "，" if fs.online_last_text.rstrip()[-1:] not in "，。！？、；：,.!?;:" else ""
@@ -247,6 +254,20 @@ async def _process_audio_frame(
             fs.online_cut_cursor = fs.online_total
             fs.online_epoch += 1
             fs.online_last_trigger = fs.online_total
+            fs.online_speech_samples = 0
+            triggered_cut = True
+
+    # 有效语音 ≥ 10s 强制在线切分
+    if not triggered_cut and fs.online_speech_samples >= ONLINE_MAX_SPEECH_SAMPLES:
+        logger.debug("online vad cut (duration): samples=%d epoch=%d",
+                     fs.online_speech_samples, fs.online_epoch)
+        if fs.online_last_text:
+            sep = "，" if fs.online_last_text.rstrip()[-1:] not in "，。！？、；：,.!?;:" else ""
+            fs.online_accumulated_text = fs.online_accumulated_text + fs.online_last_text + sep
+        fs.online_cut_cursor = fs.online_total
+        fs.online_epoch += 1
+        fs.online_last_trigger = fs.online_total
+        fs.online_speech_samples = 0
 
     _maybe_trigger_online(fs, hotwords, result_queue, all_tasks, vad)
 
@@ -278,6 +299,7 @@ def _do_trigger_offline(
 
     fs.online_buffer.clear()
     fs.online_speech_flags.clear()
+    fs.online_speech_samples = 0
     fs.online_total = 0
     fs.online_last_trigger = 0
     fs.online_epoch += 1
