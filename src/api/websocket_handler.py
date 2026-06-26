@@ -351,6 +351,8 @@ async def _do_online_asr(
             logger.debug("online stale: seg=%d epoch=%d current=%d", seg_id_snap, epoch_snap, fs.online_epoch)
             return
         text = strip_trailing_punct(text)
+        if text and text.count("，") > 10:
+            text = ""
         if text:
             full_text = (fs.online_accumulated_text + text) if fs.online_accumulated_text else text
             fs.online_last_text = full_text

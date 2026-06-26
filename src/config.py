@@ -19,14 +19,14 @@ class Settings:
 
         # VAD 参数
         self.vad_hop_size: int = int(os.getenv("VAD_HOP_SIZE", "640"))
-        self.vad_threshold: float = float(os.getenv("VAD_THRESHOLD", "0.5"))
+        self.vad_threshold: float = float(os.getenv("VAD_THRESHOLD", "0.75"))
         self.vad_min_speech: float = float(os.getenv("VAD_MIN_SPEECH", "0.8"))
         self.vad_max_speech: float = float(os.getenv("VAD_MAX_SPEECH", "60.0"))
         self.asr_pad_frames: int = int(os.getenv("ASR_PAD_FRAMES", "5"))
 
         # Online ASR 触发阈值
-        self.online_trigger_ms: int = int(os.getenv("ONLINE_TRIGGER_MS", "400"))
-        self.online_vad_pause_ms: int = int(os.getenv("ONLINE_VAD_PAUSE_MS", "500"))
+        self.online_trigger_ms: int = int(os.getenv("ONLINE_TRIGGER_MS", "200"))
+        self.online_vad_pause_ms: int = int(os.getenv("ONLINE_VAD_PAUSE_MS", "350"))
 
         # ITN 多进程池
         self.itn_workers: int = int(os.getenv("ITN_WORKERS", "8"))

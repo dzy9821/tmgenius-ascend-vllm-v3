@@ -64,7 +64,7 @@ def _build_wav_bytes(pcm_int16: np.ndarray) -> bytes:
 _ASR_TAG_RE = re.compile(r'language\s+\w+\s*<asr_text>', re.IGNORECASE)
 
 
-def _detect_and_fix_repetitions(text: str, threshold: int = 20) -> str:
+def _detect_and_fix_repetitions(text: str, threshold: int = 4) -> str:
     def _fix_char_repeats(s: str, thresh: int) -> str:
         res = []
         i = 0
