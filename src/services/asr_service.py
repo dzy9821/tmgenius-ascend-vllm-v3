@@ -199,7 +199,12 @@ class VLLMASRClient:
 
         response = await self._client.post(
             "/chat/completions",
-            json={"model": self._model_name, "messages": messages},
+            json={
+                "model": self._model_name,
+                "messages": messages,
+                "frequency_penalty": 0.8,
+                "presence_penalty": 0.8,
+            },
         )
         response.raise_for_status()
         result = response.json()
