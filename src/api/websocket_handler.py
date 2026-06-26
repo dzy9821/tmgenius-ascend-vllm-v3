@@ -365,6 +365,8 @@ async def _do_online_asr(
             # 过期结果：VAD cut（同 segment）的文本需累加；离线触发（跨 segment）则丢弃
             if text:
                 text = strip_trailing_punct(text)
+                if text.count("，") > 5:
+                    text = ""
                 if text and fs.seg_id == seg_id_snap:
                     fs.online_last_text = text
                     sep = "，" if text[-1] not in "，。！？、；：,.!?;:" else ""
