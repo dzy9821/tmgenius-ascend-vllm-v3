@@ -64,7 +64,8 @@ def _build_wav_bytes(pcm_int16: np.ndarray) -> bytes:
 _ASR_TAG_RE = re.compile(r'language\s+\w+\s*<asr_text>', re.IGNORECASE)
 
 
-def _detect_and_fix_repetitions(text: str, threshold: int = 4) -> str:
+def _detect_and_fix_repetitions(text: str) -> str:
+    threshold = get_settings().asr_rep_threshold
     def _fix_char_repeats(s: str, thresh: int) -> str:
         res = []
         i = 0
@@ -209,7 +210,18 @@ class VLLMASRClient:
         response.raise_for_status()
         result = response.json()
         raw_text = result.get("choices", [{}])[0].get("message", {}).get("content", "")
-        return _filter_hallucination(_parse_asr_response(raw_text), hotwords)
+        text = _filter_hallucination(_parse_asr_response(raw_text), hotwords)
+        if text:
+            s = get_settings()
+            audio_sec = len(audio) / SAMPLE_RATE
+            max_chars = max(audio_sec * s.asr_max_chars_per_sec, 10)
+            if len(text) > max_chars:
+                logger.warning(
+                    "text length exceeded: audio=%.1fs text=%d chars max=%.0f ratio=%.1f",
+                    audio_sec, len(text), max_chars, s.asr_max_chars_per_sec,
+                )
+                return ""
+        return text
 
     async def check_health(self) -> bool:
         try:

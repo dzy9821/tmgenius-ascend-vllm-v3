@@ -27,6 +27,12 @@ class Settings:
         # Online ASR 触发阈值
         self.online_trigger_ms: int = int(os.getenv("ONLINE_TRIGGER_MS", "200"))
         self.online_vad_pause_ms: int = int(os.getenv("ONLINE_VAD_PAUSE_MS", "350"))
+        self.online_max_speech_ms: int = int(os.getenv("ONLINE_MAX_SPEECH_MS", "10000"))
+        self.online_comma_limit: int = int(os.getenv("ONLINE_COMMA_LIMIT", "5"))
+
+        # ASR 幻觉过滤
+        self.asr_rep_threshold: int = int(os.getenv("ASR_REP_THRESHOLD", "4"))
+        self.asr_max_chars_per_sec: float = float(os.getenv("ASR_MAX_CHARS_PER_SEC", "5.0"))
 
         # ITN 多进程池
         self.itn_workers: int = int(os.getenv("ITN_WORKERS", "8"))

@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 FINALIZE_SENTINEL = object()
 ONLINE_TRIGGER_SAMPLES: int = get_settings().online_trigger_ms * 16  # 400ms * 16 = 6400
 ONLINE_VAD_PAUSE_SEC: float = get_settings().online_vad_pause_ms / 1000.0  # 500ms = 0.5s
-ONLINE_MAX_SPEECH_SAMPLES: int = 10 * 16000  # 10s 有效语音 → 强制在线切分
+ONLINE_MAX_SPEECH_SAMPLES: int = get_settings().online_max_speech_ms * 16
 
 _itn_service: Any = None
 _rnnoise_service_ref: Any = None
@@ -365,7 +365,7 @@ async def _do_online_asr(
             # 过期结果：VAD cut（同 segment）的文本需累加；离线触发（跨 segment）则丢弃
             if text:
                 text = strip_trailing_punct(text)
-                if text.count("，") > 5:
+                if text.count("，") > get_settings().online_comma_limit:
                     text = ""
                 if text and fs.seg_id == seg_id_snap:
                     fs.online_last_text = text
@@ -375,7 +375,7 @@ async def _do_online_asr(
             logger.debug("online stale: seg=%d epoch=%d current=%d", seg_id_snap, epoch_snap, fs.online_epoch)
             return
         text = strip_trailing_punct(text)
-        if text and text.count("，") > 10:
+        if text and text.count("，") > get_settings().online_comma_limit:
             text = ""
         if text:
             full_text = (fs.online_accumulated_text + text) if fs.online_accumulated_text else text
