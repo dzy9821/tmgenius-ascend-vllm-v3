@@ -81,7 +81,7 @@ def _detect_and_fix_repetitions(text: str) -> str:
             i += count
         return "".join(res)
 
-    def _fix_pattern_repeats(s: str, thresh: int, max_len: int = 20) -> str:
+    def _fix_pattern_repeats(s: str, thresh: int, max_len: int = 30) -> str:
         n = len(s)
         min_repeat_chars = thresh * 2
         if n < min_repeat_chars:

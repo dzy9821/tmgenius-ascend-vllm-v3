@@ -365,23 +365,32 @@ async def _do_online_asr(
             # 过期结果：VAD cut（同 segment）的文本需累加；离线触发（跨 segment）则丢弃
             if text:
                 text = strip_trailing_punct(text)
-                if text.count("，") > get_settings().online_comma_limit:
-                    text = ""
                 if text and fs.seg_id == seg_id_snap:
                     fs.online_last_text = text
-                    sep = "，" if text[-1] not in "，。！？、；：,.!?;:" else ""
-                    fs.online_accumulated_text = fs.online_accumulated_text + text + sep
+                    candidate = fs.online_accumulated_text + text
+                    if candidate.count("，") > get_settings().online_comma_limit:
+                        logger.debug("online comma limit (stale): %d commas, discarding",
+                                     candidate.count("，"))
+                        fs.online_accumulated_text = ""
+                        fs.online_last_text = ""
+                    else:
+                        sep = "，" if text[-1] not in "，。！？、；：,.!?;:" else ""
+                        fs.online_accumulated_text = candidate + sep
             fs.online_busy = False
             logger.debug("online stale: seg=%d epoch=%d current=%d", seg_id_snap, epoch_snap, fs.online_epoch)
             return
         text = strip_trailing_punct(text)
-        if text and text.count("，") > get_settings().online_comma_limit:
-            text = ""
         if text:
             full_text = (fs.online_accumulated_text + text) if fs.online_accumulated_text else text
-            fs.online_last_text = full_text
-            logger.debug("online result: seg=%d epoch=%d text=%s", seg_id_snap, epoch_snap, full_text)
-            await result_queue.put(QueueMsg(seg_id_snap, "Progressive", full_text, bg, ed))
+            if full_text.count("，") > get_settings().online_comma_limit:
+                logger.debug("online comma limit: %d commas, discarding full_text",
+                             full_text.count("，"))
+                fs.online_accumulated_text = ""
+                fs.online_last_text = ""
+            else:
+                fs.online_last_text = full_text
+                logger.debug("online result: seg=%d epoch=%d text=%s", seg_id_snap, epoch_snap, full_text)
+                await result_queue.put(QueueMsg(seg_id_snap, "Progressive", full_text, bg, ed))
     finally:
         if fs.online_epoch == epoch_snap:
             fs.online_busy = False
