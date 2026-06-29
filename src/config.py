@@ -19,7 +19,7 @@ class Settings:
 
         # VAD 参数
         self.vad_hop_size: int = int(os.getenv("VAD_HOP_SIZE", "640"))
-        self.vad_threshold: float = float(os.getenv("VAD_THRESHOLD", "0.75"))
+        self.vad_threshold: float = float(os.getenv("VAD_THRESHOLD", "0.6"))
         self.vad_min_speech: float = float(os.getenv("VAD_MIN_SPEECH", "0.8"))
         self.vad_max_speech: float = float(os.getenv("VAD_MAX_SPEECH", "60.0"))
         self.asr_pad_frames: int = int(os.getenv("ASR_PAD_FRAMES", "5"))
@@ -31,8 +31,8 @@ class Settings:
         self.online_comma_limit: int = int(os.getenv("ONLINE_COMMA_LIMIT", "5"))
 
         # ASR 幻觉过滤
-        self.asr_rep_threshold: int = int(os.getenv("ASR_REP_THRESHOLD", "4"))
-        self.asr_max_chars_per_sec: float = float(os.getenv("ASR_MAX_CHARS_PER_SEC", "6.0"))
+        self.asr_rep_threshold: int = int(os.getenv("ASR_REP_THRESHOLD", "3"))
+        self.asr_max_chars_per_sec: float = float(os.getenv("ASR_MAX_CHARS_PER_SEC", "8.0"))
 
         # ITN 多进程池
         self.itn_workers: int = int(os.getenv("ITN_WORKERS", "8"))
