@@ -388,7 +388,7 @@ async def _do_online_asr(
                 fs.online_accumulated_text = ""
                 fs.online_last_text = ""
             else:
-                fs.online_last_text = full_text
+                fs.online_last_text = text
                 logger.debug("online result: seg=%d epoch=%d text=%s", seg_id_snap, epoch_snap, full_text)
                 await result_queue.put(QueueMsg(seg_id_snap, "Progressive", full_text, bg, ed))
     finally:
