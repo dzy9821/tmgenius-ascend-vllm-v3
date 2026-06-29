@@ -158,9 +158,8 @@ async def handle_websocket(websocket: WebSocket) -> None:
         # End of stream: flush VAD and create tail offline tasks
         tail = vad.flush()
         if tail:
-            audio = np.concatenate(fs.online_buffer) if fs.online_buffer else tail["audio"]
             _do_trigger_offline(
-                audio, tail["start_sample"], tail["end_sample"],
+                tail["audio"], tail["start_sample"], tail["end_sample"],
                 fs, hotwords, result_queue, reorder, all_tasks,
                 is_final=True,
             )
@@ -235,9 +234,8 @@ async def _process_audio_frame(
             fs.online_speech_samples += vad.hop_size
 
     for seg in segs:
-        audio = np.concatenate(fs.online_buffer) if fs.online_buffer else seg["audio"]
         _do_trigger_offline(
-            audio, seg["start_sample"], seg["end_sample"],
+            seg["audio"], seg["start_sample"], seg["end_sample"],
             fs, hotwords, result_queue, reorder, all_tasks,
         )
 
