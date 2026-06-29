@@ -31,8 +31,8 @@ class Settings:
         self.online_comma_limit: int = int(os.getenv("ONLINE_COMMA_LIMIT", "5"))
 
         # ASR 幻觉过滤
-        self.asr_rep_threshold: int = int(os.getenv("ASR_REP_THRESHOLD", "3"))
-        self.asr_max_chars_per_sec: float = float(os.getenv("ASR_MAX_CHARS_PER_SEC", "8.0"))
+        self.asr_rep_threshold: int = int(os.getenv("ASR_REP_THRESHOLD", "2"))
+        self.asr_max_chars_per_sec: float = float(os.getenv("ASR_MAX_CHARS_PER_SEC", "6.0"))
 
         # ITN 多进程池
         self.itn_workers: int = int(os.getenv("ITN_WORKERS", "8"))
