@@ -123,12 +123,13 @@ def _detect_and_fix_repetitions(text: str) -> str:
     return text
 
 
-def _parse_asr_response(content: str) -> str:
+def _parse_asr_response(content: str, skip_rep_check: bool = False) -> str:
     """Strip Qwen3-ASR format tags and fix repetition hallucinations."""
     if not content:
         return ""
     text = _ASR_TAG_RE.sub('', content).strip()
-    text = _detect_and_fix_repetitions(text)
+    if not skip_rep_check:
+        text = _detect_and_fix_repetitions(text)
     return text
 
 
@@ -180,7 +181,7 @@ class VLLMASRClient:
             trust_env=False,
         )
 
-    async def transcribe(self, audio: np.ndarray, hotwords: str = "", skip_length_check: bool = False) -> str:
+    async def transcribe(self, audio: np.ndarray, hotwords: str = "", skip_length_check: bool = False, skip_rep_check: bool = False) -> str:
         wav_bytes = _build_wav_bytes(audio)
         audio_b64 = base64.b64encode(wav_bytes).decode()
 
@@ -210,7 +211,7 @@ class VLLMASRClient:
         response.raise_for_status()
         result = response.json()
         raw_text = result.get("choices", [{}])[0].get("message", {}).get("content", "")
-        text = _filter_hallucination(_parse_asr_response(raw_text), hotwords)
+        text = _filter_hallucination(_parse_asr_response(raw_text, skip_rep_check=skip_rep_check), hotwords)
         if text and not skip_length_check:
             s = get_settings()
             audio_sec = len(audio) / SAMPLE_RATE
@@ -244,10 +245,10 @@ class RoundRobinASRClient:
         self._idx_cycle = itertools.cycle(range(len(self._clients)))
         self._lock = asyncio.Lock()
 
-    async def transcribe(self, audio: "np.ndarray", hotwords: str = "", skip_length_check: bool = False) -> str:
+    async def transcribe(self, audio: "np.ndarray", hotwords: str = "", skip_length_check: bool = False, skip_rep_check: bool = False) -> str:
         async with self._lock:
             idx = next(self._idx_cycle)
-        return await self._clients[idx].transcribe(audio, hotwords, skip_length_check=skip_length_check)
+        return await self._clients[idx].transcribe(audio, hotwords, skip_length_check=skip_length_check, skip_rep_check=skip_rep_check)
 
     async def check_health(self) -> bool:
         results = await asyncio.gather(

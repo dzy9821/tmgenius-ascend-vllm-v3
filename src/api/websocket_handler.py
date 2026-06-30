@@ -404,7 +404,7 @@ async def _do_offline_asr(
     reorder: ReorderState,
 ) -> None:
     try:
-        text = await get_offline_client().transcribe(audio, hotwords=hotwords, skip_length_check=True)
+        text = await get_offline_client().transcribe(audio, hotwords=hotwords, skip_length_check=True, skip_rep_check=True)
         if text and _itn_service is not None:
             try:
                 text = await _itn_service.process(text)
