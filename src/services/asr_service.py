@@ -211,6 +211,7 @@ class VLLMASRClient:
         response.raise_for_status()
         result = response.json()
         raw_text = result.get("choices", [{}])[0].get("message", {}).get("content", "")
+        logger.debug("asr raw result: %r", raw_text)
         text = _filter_hallucination(_parse_asr_response(raw_text, skip_rep_check=skip_rep_check), hotwords)
         if text and not skip_length_check:
             s = get_settings()
