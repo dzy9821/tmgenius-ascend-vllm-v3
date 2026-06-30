@@ -63,6 +63,7 @@ class TenVADSession:
         self._gap_speech: int = 0
         self._gap_buffer: list[np.ndarray] = []
         self._merged_frames: int = 0
+        self._merged_gap_samples: int = 0  # gap merge 保留的音频样本数
 
         # diagnostics: aggregate prob/flag stats over ~1s windows
         self._diag_window: int = max(1, round(1.0 / self.frame_duration))
@@ -158,6 +159,7 @@ class TenVADSession:
                 self._gap_base_silence = 0
                 self._gap_speech = 0
                 self._gap_buffer.clear()
+                self._merged_gap_samples = 0
                 self._speech_start_sample = (
                     self._total_samples - self.hop_size
                     - len(self._pre_snapshot) * self.hop_size
@@ -187,13 +189,15 @@ class TenVADSession:
                 if self._gap_active and self._gap_speech > 0:
                     gap_speech_dur = self._gap_speech * self.frame_duration
                     if gap_speech_dur < MIN_SPEECH_DURATION:
-                        # 合并：gap 语音算作静音，gap_buffer 丢弃
+                        # 合并：gap 语音算作静音，但音频保留进 _segment_frames
                         logger.debug(
                             "vad gap merge: dur=%.0fms < min=%.0fms "
                             "base_silence=%df speech=%df",
                             gap_speech_dur * 1000, MIN_SPEECH_DURATION * 1000,
                             self._gap_base_silence, self._gap_speech,
                         )
+                        self._segment_frames.extend(self._gap_buffer)
+                        self._merged_gap_samples += len(self._gap_buffer) * self.hop_size
                         self._silence_frame_count = (
                             self._gap_base_silence + self._gap_speech
                         )
@@ -252,7 +256,7 @@ class TenVADSession:
 
     def _compute_segment_end(self) -> int:
         pad_samples = self._pad_frames * self.hop_size
-        target_end = self._last_speech_end_sample + pad_samples
+        target_end = self._last_speech_end_sample + self._merged_gap_samples + pad_samples
         buffered_end = self._speech_start_sample + (
             len(self._pre_snapshot) + len(self._segment_frames)
         ) * self.hop_size
@@ -291,6 +295,7 @@ class TenVADSession:
         self._gap_speech = 0
         self._gap_buffer.clear()
         self._merged_frames = 0
+        self._merged_gap_samples = 0
 
 
 def _log_vad_cut(
