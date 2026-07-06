@@ -323,14 +323,10 @@ def _maybe_trigger_online(
 
     epoch_snap = fs.online_epoch
     cursor_idx = fs.online_cut_cursor // vad.hop_size
-    speech_frames = [
-        fs.online_buffer[i]
-        for i in range(cursor_idx, len(fs.online_buffer))
-        if i < len(fs.online_speech_flags) and fs.online_speech_flags[i] == 1
-    ]
-    if not speech_frames:
+    if cursor_idx >= len(fs.online_buffer):
         return
-    audio_snap = np.concatenate(speech_frames)
+    # 保留静音间隔，取 cursor 之后所有帧（含语音和静音），保持音频连续性
+    audio_snap = np.concatenate(fs.online_buffer[cursor_idx:])
     seg_id_snap = fs.seg_id
     bg_snap = fs.seg_start_abs // 16
     ed_snap = fs.abs_samples // 16
@@ -358,7 +354,13 @@ async def _do_online_asr(
     fs: FrameState,
 ) -> None:
     try:
+        audio_dur = len(audio) / 16000
+        logger.info(
+            "online asr: seg=%d epoch=%d samples=%d dur=%.2fs bg=%d ed=%d",
+            seg_id_snap, epoch_snap, len(audio), audio_dur, bg, ed,
+        )
         text = await get_online_client().transcribe(audio, hotwords="")
+        logger.info("online asr raw: seg=%d epoch=%d text=%r", seg_id_snap, epoch_snap, text)
         if fs.online_epoch != epoch_snap:
             # 过期结果：VAD cut（同 segment）的文本需累加；离线触发（跨 segment）则丢弃
             if text:
@@ -404,7 +406,13 @@ async def _do_offline_asr(
     reorder: ReorderState,
 ) -> None:
     try:
+        audio_dur = len(audio) / 16000
+        logger.info(
+            "offline asr: seg=%d samples=%d dur=%.2fs bg=%d ed=%d",
+            seg_id, len(audio), audio_dur, bg, ed,
+        )
         text = await get_offline_client().transcribe(audio, hotwords=hotwords, skip_length_check=True, skip_rep_check=True)
+        logger.info("offline asr raw: seg=%d text=%r", seg_id, text)
         if text and _itn_service is not None:
             try:
                 text = await _itn_service.process(text)

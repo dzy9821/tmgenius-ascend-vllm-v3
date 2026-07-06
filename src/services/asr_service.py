@@ -211,7 +211,7 @@ class VLLMASRClient:
         response.raise_for_status()
         result = response.json()
         raw_text = result.get("choices", [{}])[0].get("message", {}).get("content", "")
-        logger.debug("asr raw result: %r", raw_text)
+        logger.info("vllm raw result: %r", raw_text)
         text = _filter_hallucination(_parse_asr_response(raw_text, skip_rep_check=skip_rep_check), hotwords)
         if text and not skip_length_check:
             s = get_settings()
@@ -265,8 +265,7 @@ class RoundRobinASRClient:
 
 @lru_cache(maxsize=1)
 def get_online_client() -> RoundRobinASRClient:
-    s = get_settings()
-    return RoundRobinASRClient(s.online_api_bases, s.online_model_name, s.vllm_api_key)
+    return get_offline_client()
 
 
 @lru_cache(maxsize=1)
