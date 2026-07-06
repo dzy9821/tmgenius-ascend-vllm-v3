@@ -25,7 +25,7 @@ HOP_SIZE: int = _settings.vad_hop_size
 VAD_THRESHOLD: float = _settings.vad_threshold
 PAUSE_THRESHOLD: float = _settings.vad_min_speech
 MAX_SPEECH_DURATION: float = _settings.vad_max_speech
-MIN_SPEECH_DURATION: float = 0.5
+MIN_SPEECH_DURATION: float = 0.2
 SAMPLE_RATE = 16000
 
 
@@ -189,7 +189,8 @@ class TenVADSession:
                 if self._gap_active and self._gap_speech > 0:
                     gap_speech_dur = self._gap_speech * self.frame_duration
                     if gap_speech_dur < MIN_SPEECH_DURATION:
-                        # 合并：gap 语音算作静音，但音频保留进 _segment_frames
+                        # 合并：gap 语音音频保留，同时计入 speech_frame_count
+                        # 避免 speech_duration 低估导致 _finalize_segment 误丢弃
                         logger.debug(
                             "vad gap merge: dur=%.0fms < min=%.0fms "
                             "base_silence=%df speech=%df",
@@ -197,6 +198,7 @@ class TenVADSession:
                             self._gap_base_silence, self._gap_speech,
                         )
                         self._segment_frames.extend(self._gap_buffer)
+                        self._speech_frame_count += self._gap_speech
                         self._merged_gap_samples += len(self._gap_buffer) * self.hop_size
                         self._silence_frame_count = (
                             self._gap_base_silence + self._gap_speech

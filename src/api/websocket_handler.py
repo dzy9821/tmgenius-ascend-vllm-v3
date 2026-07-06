@@ -68,6 +68,9 @@ class FrameState:
     online_speech_samples: int = 0
     online_last_text: str = ""
     online_accumulated_text: str = ""
+    # VAD cut 不再直接累加文本，改为标记"待累加"交由 stale 结果处理
+    online_pending_accumulate: bool = False
+    online_accumulate_base: str = ""
     # 绝对样本时钟（自连接开始累计），用于计算 bg/ed
     abs_samples: int = 0
     seg_start_abs: int = 0
@@ -246,9 +249,10 @@ async def _process_audio_frame(
         if fs.online_total - fs.online_cut_cursor > silence_samples:
             logger.debug("online vad cut (silence): cursor=%d -> %d epoch=%d",
                          fs.online_cut_cursor, fs.online_total, fs.online_epoch)
+            _flush_pending_accumulate(fs)
             if fs.online_last_text:
-                sep = "，" if fs.online_last_text.rstrip()[-1:] not in "，。！？、；：,.!?;:" else ""
-                fs.online_accumulated_text = fs.online_accumulated_text + fs.online_last_text + sep
+                fs.online_pending_accumulate = True
+                fs.online_accumulate_base = fs.online_last_text
             fs.online_cut_cursor = fs.online_total
             fs.online_epoch += 1
             fs.online_last_trigger = fs.online_total
@@ -259,15 +263,27 @@ async def _process_audio_frame(
     if not triggered_cut and fs.online_speech_samples >= ONLINE_MAX_SPEECH_SAMPLES:
         logger.debug("online vad cut (duration): samples=%d epoch=%d",
                      fs.online_speech_samples, fs.online_epoch)
+        _flush_pending_accumulate(fs)
         if fs.online_last_text:
-            sep = "，" if fs.online_last_text.rstrip()[-1:] not in "，。！？、；：,.!?;:" else ""
-            fs.online_accumulated_text = fs.online_accumulated_text + fs.online_last_text + sep
+            fs.online_pending_accumulate = True
+            fs.online_accumulate_base = fs.online_last_text
         fs.online_cut_cursor = fs.online_total
         fs.online_epoch += 1
         fs.online_last_trigger = fs.online_total
         fs.online_speech_samples = 0
 
     _maybe_trigger_online(fs, hotwords, result_queue, all_tasks, vad)
+
+
+def _flush_pending_accumulate(fs: FrameState) -> None:
+    """兜底：上一次 VAD cut 的文本若未被 stale 结果消费，在此处补累加。"""
+    if fs.online_pending_accumulate and fs.online_accumulate_base:
+        sep = "，" if fs.online_accumulate_base.rstrip()[-1:] not in "，。！？、；：,.!?;:" else ""
+        fs.online_accumulated_text += fs.online_accumulate_base + sep
+        logger.debug("online accumulate fallback: base=%r accumulated=%r",
+                     fs.online_accumulate_base, fs.online_accumulated_text)
+    fs.online_pending_accumulate = False
+    fs.online_accumulate_base = ""
 
 
 def _do_trigger_offline(
@@ -305,6 +321,8 @@ def _do_trigger_offline(
     fs.online_cut_cursor = 0
     fs.online_last_text = ""
     fs.online_accumulated_text = ""
+    fs.online_pending_accumulate = False
+    fs.online_accumulate_base = ""
     fs.seg_id += 1
     fs.seg_start_abs = fs.abs_samples
 
@@ -362,20 +380,36 @@ async def _do_online_asr(
         text = await get_online_client().transcribe(audio, hotwords="")
         logger.info("online asr raw: seg=%d epoch=%d text=%r", seg_id_snap, epoch_snap, text)
         if fs.online_epoch != epoch_snap:
-            # 过期结果：VAD cut（同 segment）的文本需累加；离线触发（跨 segment）则丢弃
+            # VAD cut 已将文本标记为 pending，此处用 stale 结果做最终累加
             if text:
                 text = strip_trailing_punct(text)
                 if text and fs.seg_id == seg_id_snap:
+                    if fs.online_pending_accumulate:
+                        # 首个 stale：替代 VAD cut 的过早累加，使用完整结果
+                        sep = "，" if text[-1] not in "，。！？、；：,.!?;:" else ""
+                        fs.online_accumulated_text += text + sep
+                        fs.online_pending_accumulate = False
+                        fs.online_accumulate_base = text
+                        logger.debug("online stale accumulate: text=%r accumulated=%r",
+                                     text, fs.online_accumulated_text)
+                    elif fs.online_accumulate_base and text.startswith(fs.online_accumulate_base) and len(text) > len(fs.online_accumulate_base):
+                        # 后续 stale：只累加增量（去除前导通用的标点）
+                        delta = text[len(fs.online_accumulate_base):].lstrip("，。！？、；：,.!?;: ")
+                        if delta:
+                            fs.online_accumulated_text += delta
+                            fs.online_accumulate_base = text
+                            logger.debug("online stale delta: base=%r delta=%r", fs.online_accumulate_base, delta)
+                    elif not fs.online_accumulate_base:
+                        # 兜底：无 VAD cut 背景时直接累加
+                        sep = "，" if text[-1] not in "，。！？、；：,.!?;:" else ""
+                        fs.online_accumulated_text += text + sep
+                        fs.online_accumulate_base = text
                     fs.online_last_text = text
-                    candidate = fs.online_accumulated_text + text
-                    if candidate.count("，") > get_settings().online_comma_limit:
+                    if fs.online_accumulated_text.count("，") > get_settings().online_comma_limit:
                         logger.debug("online comma limit (stale): %d commas, discarding",
-                                     candidate.count("，"))
+                                     fs.online_accumulated_text.count("，"))
                         fs.online_accumulated_text = ""
                         fs.online_last_text = ""
-                    else:
-                        sep = "，" if text[-1] not in "，。！？、；：,.!?;:" else ""
-                        fs.online_accumulated_text = candidate + sep
             fs.online_busy = False
             logger.debug("online stale: seg=%d epoch=%d current=%d", seg_id_snap, epoch_snap, fs.online_epoch)
             return
