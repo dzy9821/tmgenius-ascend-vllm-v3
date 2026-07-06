@@ -23,50 +23,50 @@ trap cleanup SIGTERM SIGINT SIGQUIT
 # ==========================================================
 #  1. 启动 Qwen3-ASR-1.7B (端口 15002)
 # ==========================================================
-echo "=== [entrypoint] 启动 Qwen3-ASR-1.7B #1 (端口 15002, mem 0.21) ==="
+echo "=== [entrypoint] 启动 Qwen3-ASR-1.7B #1 (端口 15002, mem 0.13) ==="
 ASCEND_RT_VISIBLE_DEVICES=2 \
   vllm serve "/weights/Qwen3-ASR-1.7B" \
   --served-model-name Qwen3-ASR-1.7B \
-  --gpu-memory-utilization 0.21 \
+  --gpu-memory-utilization 0.13 \
   --max-model-len 4096 \
   --host 0.0.0.0 \
-  --compilation-config '{"cudagraph_mode":"FULL_DECODE_ONLY","cudagraph_capture_sizes":[1,2,4,8,16,32,64]}' \
+  --compilation-config '{"cudagraph_mode":"FULL_DECODE_ONLY","cudagraph_capture_sizes":[1,2,4,8,16,32]}' \
   --port 15002 &
 VLLM_PIDS+=($!)
 echo "[entrypoint] 1.7B #1 PID=${VLLM_PIDS[-1]}"
 
-echo "=== [entrypoint] 启动 Qwen3-ASR-1.7B #2 (端口 15003, mem 0.21) ==="
+echo "=== [entrypoint] 启动 Qwen3-ASR-1.7B #2 (端口 15003, mem 0.13) ==="
 ASCEND_RT_VISIBLE_DEVICES=2 \
   vllm serve "/weights/Qwen3-ASR-1.7B" \
   --served-model-name Qwen3-ASR-1.7B \
-  --gpu-memory-utilization 0.21 \
+  --gpu-memory-utilization 0.13 \
   --max-model-len 4096 \
   --host 0.0.0.0 \
-  --compilation-config '{"cudagraph_mode":"FULL_DECODE_ONLY","cudagraph_capture_sizes":[1,2,4,8,16,32,64]}' \
+  --compilation-config '{"cudagraph_mode":"FULL_DECODE_ONLY","cudagraph_capture_sizes":[1,2,4,8,16,32]}' \
   --port 15004 &
 VLLM_PIDS+=($!)
 echo "[entrypoint] 1.7B #2 PID=${VLLM_PIDS[-1]}"
 
-# 等 1.7B 实例加载完成再启动 0.6B
+# 等 1.7B 实例加载完成再启动 1.7B
 sleep 150
 
 # ==========================================================
-#  2. 启动 6 个 Qwen3-ASR-0.6B (端口 15004-15014, 步进 2)
+#  2. 启动 6 个 Qwen3-ASR-1.7B (端口 15004-15014, 步进 2)
 # ==========================================================
-echo "=== [entrypoint] 启动 6 个 Qwen3-ASR-0.6B ==="
+echo "=== [entrypoint] 启动 6 个 Qwen3-ASR-1.7B ==="
 for i in $(seq 0 5); do
     PORT=$((15006 + i * 2))
-    echo "[entrypoint] Qwen3-ASR-0.6B #$((i+1)) → 端口 $PORT"
+    echo "[entrypoint] Qwen3-ASR-1.7B #$((i+1)) → 端口 $PORT"
     ASCEND_RT_VISIBLE_DEVICES=2 \
-      vllm serve "/weights/Qwen3-ASR-0.6B" \
-      --served-model-name Qwen3-ASR-0.6B \
-      --gpu-memory-utilization 0.08 \
+      vllm serve "/weights/Qwen3-ASR-1.7B" \
+      --served-model-name Qwen3-ASR-1.7B \
+      --gpu-memory-utilization 0.11 \
       --max-model-len 4096 \
       --host 0.0.0.0 \
-      --compilation-config '{"cudagraph_mode":"FULL_DECODE_ONLY","cudagraph_capture_sizes":[1,2,4,8,16,32,64]}' \
+      --compilation-config '{"cudagraph_mode":"FULL_DECODE_ONLY","cudagraph_capture_sizes":[1,2,4,8,16,32]}' \
       --port $PORT &
     VLLM_PIDS+=($!)
-    echo "[entrypoint] 0.6B #$((i+1)) PID=${VLLM_PIDS[-1]}"
+    echo "[entrypoint] 1.7B #$((i+1)) PID=${VLLM_PIDS[-1]}"
     if [ $i -lt 5 ]; then
         sleep 120
     fi
@@ -94,7 +94,7 @@ for attempt in $(seq 1 120); do
         echo "[entrypoint] 1.7B #2 → http://localhost:15004"
         for i in $(seq 0 5); do
             PORT=$((15006 + i * 2))
-            echo "[entrypoint] 0.6B #$((i+1)) → http://localhost:$PORT"
+            echo "[entrypoint] 1.7B #$((i+1)) → http://localhost:$PORT"
         done
         break
     fi

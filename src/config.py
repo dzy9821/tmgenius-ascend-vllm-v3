@@ -69,14 +69,14 @@ class Settings:
             "OFFLINE_MODEL_NAME", "Qwen3-ASR-1.7B"
         )
         self.online_model_name: str = os.getenv(
-            "ONLINE_MODEL_NAME", "Qwen3-ASR-0.6B"
+            "ONLINE_MODEL_NAME", "Qwen3-ASR-1.7B"
         )
         self.vllm_api_key: str = os.getenv("VLLM_API_KEY", "EMPTY")
         self.offline_model_path: str = os.getenv(
             "OFFLINE_MODEL_PATH", "/weights/Qwen3-ASR-1.7B"
         )
         self.online_model_path: str = os.getenv(
-            "ONLINE_MODEL_PATH", "/weights/Qwen3-ASR-0.6B"
+            "ONLINE_MODEL_PATH", "/weights/Qwen3-ASR-1.7B"
         )
         self.offline_max_model_len: int = int(
             os.getenv("OFFLINE_MAX_MODEL_LEN", "4096")
