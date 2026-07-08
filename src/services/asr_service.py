@@ -265,7 +265,8 @@ class RoundRobinASRClient:
 
 @lru_cache(maxsize=1)
 def get_online_client() -> RoundRobinASRClient:
-    return get_offline_client()
+    s = get_settings()
+    return RoundRobinASRClient(s.online_api_bases, s.online_model_name, s.vllm_api_key)
 
 
 @lru_cache(maxsize=1)
